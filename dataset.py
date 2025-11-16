@@ -168,9 +168,9 @@ class GreatLakesDataset(Dataset):
         
         # --- NEW: Load IceClass @ T (Input) ---
         ice_class_T_raw = self.icecon_data['ice_class'].sel(
-            time=date_T.strftime('%Y-%m-%d'),
+            time=date_T, # <--- Use the correct variable 'date_T'
             method='nearest'
-        )
+        ).values
         # --- END NEW ---
 
         # --- 3. Load Weather @ T+1 (Input) ---
@@ -199,8 +199,8 @@ class GreatLakesDataset(Dataset):
         temp_T_plus_1_norm = np.nan_to_num(temp_T_plus_1_raw_da.values, nan=0.0)
         
         # --- NEW: ICE CLASS: Normalize 0-5 -> 0.0-1.0 ---
-        ice_class_norm = ice_class_T_raw.values.astype(np.float32) / 5.0
-        # --- END NEW ---
+        # (FIX: ice_class_T_raw is already a numpy array, no .values needed)
+        ice_class_norm = ice_class_T_raw.astype(np.float32) / 5.0
 
         # WEATHER @ T+1: Normalize using pre-calculated stats
         weather_vars = []
