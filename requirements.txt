@@ -1,0 +1,20 @@
+#Core data handling and geospatial libraries
+
+xarray
+rioxarray
+numpy
+netCDF4
+gdal
+rasterio
+cfgrib 
+
+#ML/DL framework
+
+torch
+torchvision
+
+#Utility
+
+tqdm
+scikit-learn
+matplotlib

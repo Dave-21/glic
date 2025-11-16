@@ -1,0 +1,255 @@
+PS C:\Users\david\code\glic\0.3> tree /f
+Folder PATH listing
+Volume serial number is 5A0F-54B1
+C:.
+│   config.py
+│   dataset.py
+│   data_loaders.py
+│   data_loaders_test.py
+│   inference.py
+│   model.py
+│   requirements.txt
+│   run_test_forecast.py
+│   train.py
+│   utilities.py
+│   visualize_v2.py
+│
+├───checkpoints
+├───datasets
+│   ├───Ice Data
+│   │   ├───ice asc
+│   │   │       g20190111.ct
+│   │   │       g20190112.ct
+│   │   │       g20190113.ct
+│   │   │       g20190114.ct
+│   │   │       g20190115.ct
+│   │   │       g20190116.ct
+│   │   │       g20190117.ct
+│   │   │       g20190118.ct
+│   │   │       g20190119.ct
+│   │   │       g20190120.ct
+│   │   │       g20190121.ct
+│   │   │       g20190122.ct
+│   │   │       g20190123.ct
+│   │   │       g20190124.ct
+│   │   │       g20190125.ct
+│   │   │       g20190126.ct
+│   │   │       g20190127.ct
+│   │   │       g20190128.ct
+│   │   │       g20190129.ct
+│   │   │       g20190130.ct
+│   │   │       g20190131.ct
+│   │   │       ice_asc_README.docx
+│   │   │
+│   │   ├───ICECON
+│   │   │   ├───nc
+│   │   │   │       ICECON_nc_README.docx
+│   │   │   │       RSAT2_GSS_2019_01_10_11_26_00_0600434760_79.68W_43.73N_HH_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       RSAT2_GSS_2019_01_11_23_56_21_0600566181_90.80W_43.20N_HH_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       RSAT2_GSS_2019_01_11_23_57_27_0600566247_91.79W_47.05N_HH_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1A_ESA_2019_01_12_23_08_33_0600649713_078.65W_44.17N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1A_ESA_2019_01_15_23_32_17_0600910337_084.00W_40.71N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1A_ESA_2019_01_17_23_16_06_0601082166_080.11W_41.71N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1A_ESA_2019_01_17_23_16_31_0601082191_080.47W_43.22N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1A_ESA_2019_01_17_23_16_57_0601082217_080.86W_44.79N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1A_ESA_2019_01_19_23_00_06_0601254006_076.39W_43.39N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1A_ESA_2019_01_19_23_00_37_0601254037_076.83W_45.22N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1B_ESA_2019_01_11_23_16_19_0600563779_080.87W_45.03N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1B_ESA_2019_01_11_23_16_46_0600563806_081.28W_46.65N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1B_ESA_2019_01_12_23_57_41_0600652661_091.36W_45.84N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1B_ESA_2019_01_12_23_58_06_0600652686_091.74W_47.34N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1B_ESA_2019_01_14_23_40_29_0600824429_087.33W_43.02N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1B_ESA_2019_01_14_23_41_34_0600824494_088.37W_46.92N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1B_ESA_2019_01_19_23_48_57_0601256937_088.82W_44.01N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1B_ESA_2019_01_19_23_49_24_0601256964_089.22W_45.63N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1B_ESA_2019_01_19_23_49_49_0601256989_089.61W_47.13N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │       S1B_ESA_2019_01_19_23_50_14_0601257014_090.00W_48.63N_VV_C5_GFS05CDF_glice_level2.nc
+│   │   │   │
+│   │   │   └───png
+│   │   │           ICECON_png_README.docx
+│   │   │           RSAT2_GSS_2019_01_11_23_56_21_0600566181_90.80W_43.20N_HH_C5_GFS05CDF_glice_classes.png
+│   │   │           RSAT2_GSS_2019_01_11_23_57_27_0600566247_91.79W_47.05N_HH_C5_GFS05CDF_glice_classes.png
+│   │   │           RSAT2_GSS_2019_01_29_00_01_33_0602035293_92.78W_46.80N_HH_C5_GFS05CDF_glice_classes.png
+│   │   │           RSAT2_GSS_2019_01_29_12_11_01_0602079061_90.19W_47.77N_HH_C5_GFS05CDF_glice_classes.png
+│   │   │           RSAT2_GSS_2019_01_29_23_31_07_0602119867_84.48W_43.10N_HH_C5_GFS05CDF_glice_classes.png
+│   │   │           RSAT2_GSS_2019_01_29_23_32_18_0602119938_85.55W_47.29N_HH_C5_GFS05CDF_glice_classes.png
+│   │   │           RSAT2_GSS_2019_01_30_11_42_07_0602163727_83.30W_45.99N_HH_C5_GFS05CDF_glice_classes.png
+│   │   │           RSAT2_GSS_2019_01_30_11_43_08_0602163788_84.20W_42.41N_HH_C5_GFS05CDF_glice_classes.png
+│   │   │           RSAT2_GSS_2019_01_30_23_01_49_0602204509_77.22W_43.43N_HH_C5_GFS05CDF_glice_classes.png
+│   │   │           RSAT2_GSS_2019_01_31_11_13_34_0602248414_76.71W_43.07N_HH_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_12_23_08_33_0600649713_078.65W_44.17N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_15_23_32_17_0600910337_084.00W_40.71N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_17_23_16_06_0601082166_080.11W_41.71N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_17_23_16_31_0601082191_080.47W_43.22N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_17_23_16_57_0601082217_080.86W_44.79N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_19_23_00_06_0601254006_076.39W_43.39N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_19_23_00_37_0601254037_076.83W_45.22N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_20_23_40_37_0601342837_086.13W_41.10N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_20_23_41_02_0601342862_086.49W_42.60N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_20_23_41_27_0601342887_086.85W_44.10N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_20_23_41_52_0601342912_087.22W_45.60N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_20_23_42_17_0601342937_087.61W_47.10N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_20_23_42_42_0601342962_088.00W_48.60N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_22_23_24_20_0601514660_082.18W_41.77N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_22_23_24_45_0601514685_082.54W_43.27N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_22_23_25_10_0601514710_082.91W_44.76N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_24_23_08_08_0601686488_078.29W_42.68N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_24_23_08_33_0601686513_078.65W_44.17N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_27_23_32_16_0601947136_084.00W_40.71N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_29_23_16_05_0602118965_080.11W_41.71N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_29_23_16_30_0602118990_080.47W_43.22N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_29_23_16_57_0602119017_080.86W_44.79N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_31_23_00_06_0602290806_076.39W_43.39N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1A_ESA_2019_01_31_23_00_36_0602290836_076.83W_45.22N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_11_23_16_19_0600563779_080.87W_45.03N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_11_23_16_46_0600563806_081.28W_46.65N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_12_23_57_41_0600652661_091.36W_45.84N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_12_23_58_06_0600652686_091.74W_47.34N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_14_23_40_29_0600824429_087.33W_43.02N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_14_23_41_34_0600824494_088.37W_46.92N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_19_23_48_57_0601256937_088.82W_44.01N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_19_23_49_24_0601256964_089.22W_45.63N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_19_23_49_49_0601256989_089.61W_47.13N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_19_23_50_14_0601257014_090.00W_48.63N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_21_23_31_54_0601428714_084.21W_41.87N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_21_23_32_21_0601428741_084.60W_43.49N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_21_23_32_46_0601428766_084.97W_44.99N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_21_23_33_11_0601428791_085.35W_46.49N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_21_23_33_36_0601428816_085.74W_47.99N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_21_23_34_01_0601428841_086.14W_49.49N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_23_23_16_19_0601600579_080.87W_45.03N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_23_23_16_46_0601600606_081.28W_46.65N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_24_23_57_41_0601689461_091.36W_45.84N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_24_23_58_06_0601689486_091.74W_47.34N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_26_23_40_28_0601861228_087.33W_43.02N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_26_23_41_33_0601861293_088.37W_46.92N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_28_23_24_44_0602033084_083.10W_45.74N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_28_23_25_11_0602033111_083.51W_47.36N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_28_23_25_36_0602033136_083.91W_48.85N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_30_23_08_07_0602204887_078.85W_45.15N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_30_23_08_34_0602204914_079.26W_46.77N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_31_23_48_57_0602293737_088.82W_44.01N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_31_23_49_24_0602293764_089.22W_45.63N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_31_23_49_49_0602293789_089.61W_47.13N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │           S1B_ESA_2019_01_31_23_50_14_0602293814_090.00W_48.63N_VV_C5_GFS05CDF_glice_classes.png
+│   │   │
+│   │   ├───jpeg files
+│   │   │       20190111.jpg
+│   │   │       20190112.jpg
+│   │   │       20190113.jpg
+│   │   │       20190114.jpg
+│   │   │       20190115.jpg
+│   │   │       20190116.jpg
+│   │   │       20190117.jpg
+│   │   │       20190118.jpg
+│   │   │       20190119.jpg
+│   │   │       20190120.jpg
+│   │   │       20190121.jpg
+│   │   │       20190122.jpg
+│   │   │       20190123.jpg
+│   │   │       20190124.jpg
+│   │   │       20190125.jpg
+│   │   │       20190126.jpg
+│   │   │       20190127.jpg
+│   │   │       20190128.jpg
+│   │   │       20190129.jpg
+│   │   │       20190130.jpg
+│   │   │       20190131.jpg
+│   │   │       ice_jpg_README.docx
+│   │   │
+│   │   ├───netcdf
+│   │   │       ice_20190111-20190131.nc
+│   │   │       Readme - Ice Data NetCDF.docx
+│   │   │
+│   │   ├───Sentinel_1A_1B
+│   │   │   │   Sentinel-1A-1B_README.docx
+│   │   │   │
+│   │   │   ├───png
+│   │   │   │       S1A_IW_GRDH_1SDV_20190127T233204_20190127T233229_025670_02D9F1_D2EC.SAFE.png
+│   │   │   │       S1A_IW_GRDH_1SDV_20190129T231553_20190129T231618_025699_02DB03_5446.SAFE.png
+│   │   │   │       S1A_IW_GRDH_1SDV_20190129T231618_20190129T231643_025699_02DB03_A959.SAFE.png
+│   │   │   │       S1A_IW_GRDH_1SDV_20190129T231643_20190129T231710_025699_02DB03_4D71.SAFE.png
+│   │   │   │       S1B_IW_GRDH_1SDV_20190128T232430_20190128T232459_014701_01B683_0C0B.SAFE.png
+│   │   │   │       S1B_IW_GRDH_1SDV_20190128T232459_20190128T232524_014701_01B683_26C8.SAFE.png
+│   │   │   │       S1B_IW_GRDH_1SDV_20190128T232524_20190128T232549_014701_01B683_1CA4.SAFE.png
+│   │   │   │       S1B_IW_GRDH_1SDV_20190130T230753_20190130T230822_014730_01B775_9CC9.png
+│   │   │   │       S1B_IW_GRDH_1SDV_20190130T230822_20190130T230847_014730_01B775_96BE.png
+│   │   │   │       S1B_IW_GRDH_1SDV_20190131T234842_20190131T234911_014745_01B7E7_72FB.png
+│   │   │   │       S1B_IW_GRDH_1SDV_20190131T234911_20190131T234936_014745_01B7E7_2683.png
+│   │   │   │       S1B_IW_GRDH_1SDV_20190131T234936_20190131T235001_014745_01B7E7_B170.png
+│   │   │   │       S1B_IW_GRDH_1SDV_20190131T235001_20190131T235026_014745_01B7E7_7DF9.png
+│   │   │   │       S1B_IW_GRDH_1SDV_20190131T235001_20190131T235026_014745_01B7E7_7DF9.SAFE.png
+│   │   │   │
+│   │   │   └───zip
+│   │   │           S1A_IW_GRDH_1SDV_20190127T233204_20190127T233229_025670_02D9F1_D2EC.SAFE.zip
+│   │   │           S1A_IW_GRDH_1SDV_20190129T231553_20190129T231618_025699_02DB03_5446.SAFE.zip
+│   │   │           S1A_IW_GRDH_1SDV_20190129T231618_20190129T231643_025699_02DB03_A959.SAFE.zip
+│   │   │           S1A_IW_GRDH_1SDV_20190129T231643_20190129T231710_025699_02DB03_4D71.SAFE.zip
+│   │   │           S1B_IW_GRDH_1SDV_20190128T232430_20190128T232459_014701_01B683_0C0B.SAFE.zip
+│   │   │           S1B_IW_GRDH_1SDV_20190128T232459_20190128T232524_014701_01B683_26C8.SAFE.zip
+│   │   │           S1B_IW_GRDH_1SDV_20190128T232524_20190128T232549_014701_01B683_1CA4.SAFE.zip
+│   │   │           S1B_IW_GRDH_1SDV_20190130T230753_20190130T230822_014730_01B775_9CC9.zip
+│   │   │           S1B_IW_GRDH_1SDV_20190130T230822_20190130T230847_014730_01B775_96BE.zip
+│   │   │           S1B_IW_GRDH_1SDV_20190131T234842_20190131T234911_014745_01B7E7_72FB.zip
+│   │   │           S1B_IW_GRDH_1SDV_20190131T234911_20190131T234936_014745_01B7E7_2683.zip
+│   │   │           S1B_IW_GRDH_1SDV_20190131T234936_20190131T235001_014745_01B7E7_B170.zip
+│   │   │           S1B_IW_GRDH_1SDV_20190131T235001_20190131T235026_014745_01B7E7_7DF9.SAFE.zip
+│   │   │           S1B_IW_GRDH_1SDV_20190131T235001_20190131T235026_014745_01B7E7_7DF9.zip
+│   │   │
+│   │   └───shapefiles
+│   │           20190111.zip
+│   │           20190112.zip
+│   │           20190113.zip
+│   │           20190114.zip
+│   │           20190115.zip
+│   │           20190116.zip
+│   │           20190117.zip
+│   │           20190118.zip
+│   │           20190119.zip
+│   │           20190120.zip
+│   │           20190121.zip
+│   │           20190122.zip
+│   │           20190123.zip
+│   │           20190124.zip
+│   │           20190125.zip
+│   │           20190126.zip
+│   │           20190127.zip
+│   │           20190128.zip
+│   │           20190129.zip
+│   │           20190130.zip
+│   │           20190131.zip
+│   │           shapefiles_README.docx
+│   │
+│   ├───Test Data
+│   │   │   Test_data_Readme.docx
+│   │   │
+│   │   ├───Ice & Water Surface Temperature Initial Conditions
+│   │   │       glsea_ice_test_initial_condition.asc
+│   │   │       glsea_ice_test_initial_condition.nc
+│   │   │       ice_test_initial_condition.nc
+│   │   │
+│   │   └───Weather Data
+│   │           gfs_weather_test_period.nc
+│   │           hrrr_weather_test_period.nc
+│   │
+│   ├───Water Surface Temperature Data
+│   │   └───netcdf
+│   │           glsea_20190111-20190131.nc
+│   │           GLSEA_README.docx
+│   │
+│   └───Weather Data
+│       ├───Global Forecast System (GFS)
+│       │       gfs_20190111-20190201.nc
+│       │       Readme - GFS.docx
+│       │
+│       └───High Resolution Rapid Refresh (HRRR)
+│               hrrr_20190111-20190131.nc
+│               hrrr_20190111-20190131.nc.5b7b6.idx
+│               Readme - HRRR.docx
+│
+└───__pycache__
+        config.cpython-311.pyc
+        dataset.cpython-311.pyc
+        data_loaders.cpython-311.pyc
+        model.cpython-311.pyc
+        utilities.cpython-311.pyc
