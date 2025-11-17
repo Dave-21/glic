@@ -198,6 +198,29 @@ header {
   padding-left: 0;
 }
 
+.mask {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.mask-copy {
+  flex: 1 1 260px;
+}
+
+.mask-image {
+  flex: 1 1 260px;
+}
+
+.mask-image img {
+  width: 100%;
+  height: auto;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+
 .highlights li {
   background: rgba(255, 255, 255, 0.05);
   border-radius: 8px;
