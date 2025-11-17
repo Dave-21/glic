@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Great Lakes IceCast</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <p class="eyebrow">Great Lakes Operational Ice Forecast</p>
+        <h1>Great Lakes IceCast</h1>
+        <p class="subtitle">
+          3-day machine-learning forecast built with NIC, GLSEA, HRRR, GEBCO, and
+          shipping lane data.
+        </p>
+      </div>
+      <div class="actions">
+        <a class="button" href="../forecasts/submission_forecast_T0_to_T3.nc" download>
+          Download Forecast (NetCDF)
+        </a>
+        <a class="button ghost" href="https://github.com/example/glic">
+          View Repository
+        </a>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel">
+        <div class="controls">
+          <div class="day-buttons">
+            <button data-day="T0" class="active">T0 (Initial)</button>
+            <button data-day="T1">T+1</button>
+            <button data-day="T2">T+2</button>
+            <button data-day="T3">T+3</button>
+          </div>
+          <div class="toggles">
+            <label>
+              <input type="checkbox" id="shippingToggle" checked /> Shipping routes
+            </label>
+            <label>
+              <input type="checkbox" id="fastIceToggle" checked /> Fast-ice mask
+            </label>
+          </div>
+        </div>
+        <div class="map-wrapper">
+          <img
+            id="forecastImage"
+            src="../forecasts/forecast_T0.png"
+            alt="Ice concentration forecast"
+          />
+          <div id="shippingOverlay" class="overlay shipping" aria-hidden="true"></div>
+          <div id="fastIceOverlay" class="overlay fast-ice" aria-hidden="true"></div>
+        </div>
+        <p class="placeholder-note">
+          Inline previews appear automatically when placeholder PNG files are kept
+          under <code>/forecasts</code> to avoid committing binaries.
+        </p>
+        <div class="narratives">
+          <h2>Daily Narrative</h2>
+          <p id="narrativeText"></p>
+          <ul class="insights">
+            <li id="shippingInsight"></li>
+            <li id="fastIceInsight"></li>
+            <li>
+              Pack-ice risk is text-only in this prototype; HRRR winds > 15 kt
+              along Lake Superior's eastern shore trigger cautionary messaging.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="panel grid">
+        <article>
+          <h3>How it Works</h3>
+          <p>
+            We fuse NIC shapefile ice concentration, GLSEA surface ice & temperature,
+            HRRR temperature/wind/precipitation, GEBCO bathymetry, shipping routes,
+            and an ASC land mask. All datasets are reprojected into a unified 1 km
+            Equal-Area grid, normalized, and stacked into 3-day sequences. A
+            channel-stacked 2D U-Net forecasts the next three days, leveraging
+            overlapping patch inference (256 px with stride 128) and land-masked
+            loss to protect coastal fidelity.
+          </p>
+        </article>
+        <article>
+          <h3>Model Architecture</h3>
+          <p>
+            Encoder-decoder U-Net with 2D convolutions, group norm, and residual
+            skip connections. The network ingests C×H×W tensors built from the
+            most recent three days (stacked across channels), predicts three future
+            frames simultaneously, and blends them with fast-ice tagging (ice > 30%
+            within buffered shoreline) plus optional pack-ice risk flags.
+            Checkpoints live in <code>checkpoints/best_model.pth</code>.
+          </p>
+        </article>
+        <article>
+          <h3>Operational Relevance</h3>
+          <p>
+            Forecasts highlight choke points for USCG icebreakers, shipping lanes
+            vulnerable to consolidation, and areas where fast ice could anchor or
+            break away. The clean visualization improves upon static USNIC charts
+            by overlaying risk layers, providing downloadable NetCDF assets, and
+            delivering higher-resolution machine learning guidance.
+          </p>
+        </article>
+        <article>
+          <h3>Future Work</h3>
+          <ul>
+            <li>Classify new, melting, thin, and thick ice regimes.</li>
+            <li>Estimate ice thickness from SAR fusion.</li>
+            <li>Assimilate ice motion fields and winds for pack-ice drift.</li>
+            <li>Explore ConvLSTM/transformer backbones for longer memory.</li>
+            <li>Create a live operational dashboard with alerts.</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="panel data">
+        <h3>Data Sources</h3>
+        <div class="data-columns">
+          <ul>
+            <li>NOAA NIC Ice Charts (Shapefiles)</li>
+            <li>NOAA GLERL GLSEA Surface Temperature & Ice</li>
+            <li>NOAA HRRR weather archive (AWS)</li>
+            <li>GEBCO 2023 Bathymetry Grid</li>
+          </ul>
+          <ul>
+            <li>Shipping route shapefiles (competition dataset)</li>
+            <li>ASC ice concentration + land mask (NOAA GLERL)</li>
+            <li>GLCFS & GLISA reference archives</li>
+            <li>CoastWatch Great Lakes ice classification</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>Methodology Highlights</h3>
+        <ul class="highlights">
+          <li>Unified grid reprojection and normalization pipeline.</li>
+          <li>Automated cold-start strategy by seeding with climatology.</li>
+          <li>Overlapping patch inference (stride 128) for seamless mosaics.</li>
+          <li>Land-masked loss function to avoid coastal artifacts.</li>
+          <li>Fast-ice vs. pack-ice tagging plus shipping overlays.</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        © 2024 Great Lakes IceCast. Data courtesy NOAA NIC, GLERL, HRRR, GEBCO.
+        Not for real-world navigation.
+      </p>
+      <p>Contact: operations@icecast.dev · MIT License</p>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>

@@ -1,4 +1,6 @@
 __pycache__/
 *.pyc
-checkpoints/
+checkpoints/*
 datasets/
+!checkpoints/
+!checkpoints/best_model.pth
