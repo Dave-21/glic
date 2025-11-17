@@ -1,20 +1,67 @@
 import os
 from pathlib import Path
+import datetime
 
 # --- Project Root ---
 PROJECT_ROOT = Path(os.path.dirname(os.path.abspath(__file__)))
 DATA_ROOT = PROJECT_ROOT / "datasets"
 
+# --- NEW: Training Date Range ---
+START_DATE = datetime.date(2018, 12, 1)
+END_DATE = datetime.date(2019, 3, 1)
+
+# --- [FINAL FIX] This is the KEY ---
+# This maps our standard names to the *full Zarr paths*
+# within the 2018-2019 files.
+# HRRR_VAR_MAP = {
+#     'air_temp_2m':    '2m_above_ground/TMP',
+#     'u_wind_10m':     '10m_above_ground/UGRD',
+#     'v_wind_10m':     '10m_above_ground/VGRD',
+#     'precip_surface': 'surface/PRATE',
+# }
+HRRR_VAR_MAP = {
+    'air_temp_2m':    '2m_above_ground/TMP',
+    'u_wind_10m':     '10m_above_ground/UGRD',
+    'v_wind_10m':     '10m_above_ground/VGRD',
+    'precip_surface': 'surface/PRATE',
+}
+# This list (e.g., ['air_temp_2m', ...]) is used by the rest of the scripts
+HRRR_VARS = list(HRRR_VAR_MAP.keys())
+
+# --- NEW: Data Paths ---
+TRAIN_NIC_SHP_DIR = DATA_ROOT / "Ice Data" / "nic_shapefiles_unzipped"
+# Directory for the *new* extended GLSEA files
+#TRAIN_GLSEA_NC_DIR = DATA_ROOT / "Water Surface Temperature Data" / "netcdf_extended"
+# Zarr URL for HRRR data
+# This is the root bucket, as shown in the guide
+TRAIN_HRRR_ZARR_ROOT = 's3://hrrrzarr' 
+# This is the grid file, from "Option 2" of the guide
+
+# Path to the unzipped shipping routes shapefile
+SHIPPING_ROUTES_SHP = DATA_ROOT / "Shipping_Routes" / "shippinglanes.shp" # Check this filename
+# Land mask file (still needed)
+TRAIN_ICE_ASC_DIR = DATA_ROOT / "Ice Data" / "ice asc" # Still used for land mask
+LAND_MASK_FILE = TRAIN_ICE_ASC_DIR / "g20190111.ct" # Or any single file for the grid
+TRAIN_NIC_CACHE_FILE = DATA_ROOT / "Ice Data" / "nic_ice_data_cache.nc"
+
+TRAIN_GLSEA_ICE_NC_FILES = [
+    DATA_ROOT / "Water Surface Temperature Data" / "GLSEA_ICE" / "2018_glsea_ice.nc",
+    DATA_ROOT / "Water Surface Temperature Data" / "GLSEA_ICE" / "2019_glsea_ice.nc",
+]
+TRAIN_GLSEA_ICE_CACHE_FILE = DATA_ROOT / "Water Surface Temperature Data" / "glsea_ice_data_cache.nc"
+GEBCO_FILE = DATA_ROOT / "Water Surface Temperature Data" / "gebco_great_lakes.tif"
+
 # --- Training Data (STILL NEEDED for Land Mask) ---
-TRAIN_ICE_ASC_DIR = DATA_ROOT / "Ice Data" / "ice asc"
-TRAIN_ICECON_NC_DIR = DATA_ROOT / "Ice Data" / "ICECON" / "nc"
-TRAIN_GLSEA_NC_FILE = DATA_ROOT / "Water Surface Temperature Data" / "netcdf" / "glsea_20190111-20190131.nc"
-TRAIN_HRRR_NC_FILE = DATA_ROOT / "Weather Data" / "High Resolution Rapid Refresh (HRRR)" / "hrrr_20190111-20190131.nc"
+# TRAIN_ICECON_NC_DIR = DATA_ROOT / "Ice Data" / "ICECON" / "nc"
+# TRAIN_GLSEA_NC_FILE = DATA_ROOT / "Water Surface Temperature Data" / "netcdf" / "glsea_20190111-20190131.nc"
+# TRAIN_HRRR_NC_FILE = DATA_ROOT / "Weather Data" / "High Resolution Rapid Refresh (HRRR)" / "hrrr_20190111-20190131.nc"
 
 # --- Master Grid Definition (from training data) ---
-MASTER_GRID_TEMPLATE_FILE = TRAIN_GLSEA_NC_FILE
+ORIGINAL_GLSEA_FILE = DATA_ROOT / "Water Surface Temperature Data" / "netcdf" / "glsea_20190111-20190131.nc"
+MASTER_GRID_TEMPLATE_FILE = ORIGINAL_GLSEA_FILE
 MASTER_GRID_CRS = "EPSG:4326"  # Our target grid (standard Lat/Lon)
 ICE_ASC_NATIVE_CRS = "EPSG:3175" # NAD83 / Great Lakes Albers (projected, in meters)
+GLSEA_VARIABLE_NAME = "temp"
 
 # --- Training Constants ---
 ICE_ASC_HEADER_LINES = 7

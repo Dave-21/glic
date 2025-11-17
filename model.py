@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import dataset
 
 class ConvBlock(nn.Module):
     """
@@ -77,7 +78,7 @@ class UNet(nn.Module):
     """
     The main 2D U-Net model.
     """
-    def __init__(self, in_channels, out_channels, n_filters=64):
+    def __init__(self, in_channels=dataset.N_INPUT_CHANNELS, out_channels=dataset.N_OUTPUT_CHANNELS, n_filters=64):
         super().__init__()
         
         # Encoder
@@ -96,8 +97,9 @@ class UNet(nn.Module):
         self.out_conv = UpBlock(n_filters * 2 + n_filters, n_filters)
 
         # Final 1x1 convolution
+        #self.final_conv = nn.Conv2d(n_filters, out_channels, kernel_size=1)
         self.final_conv = nn.Conv2d(n_filters, out_channels, kernel_size=1)
-
+        
     def forward(self, x):
         # Encoder
         s1 = self.in_conv(x)
