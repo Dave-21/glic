@@ -1,53 +1,27 @@
 # Great Lakes IceCast
 
-A 2D U-Net workflow that fuses NOAA ice, weather, bathymetry, and shipping data to forecast Great Lakes ice concentration for three days ahead.
+Deterministic 2D U-Net workflow for Great Lakes ice concentration forecasts. The system blends NOAA GLSEA ice/temperature grids, NOAA National Ice Center (NIC) shapefiles, HRRR weather drivers, GEBCO bathymetry, and buffered shipping-route masks into a single training/inference stack.
 
-**Live demo:** https://example.github.io/glic (replace with your GitHub Pages URL once published)
+## Repository layout
+- `dataset.py`, `data_loaders.py`, `utilities.py`: assemble tensors, apply land and shipping-route masks, and expose helper functions used by training and inference scripts.
+- `model.py`: U-Net backbone used in `train.py` and `run_test_forecast.py`.
+- `docs/`: static dashboard (HTML/CSS/JS) plus supporting notes for GitHub Pages.
+- `forecasts/`: placeholder NetCDF/PNG outputs expected by the dashboard. Replace with real forecasts before publishing.
 
-## Overview
-Great Lakes IceCast delivers operational ice concentration forecasts for T0 through T+3 to support U.S. Coast Guard and commercial shipping decisions. The system harmonizes NIC ice charts, GLSEA temperature and ice grids, HRRR atmospheric drivers, GEBCO bathymetry, a land mask derived from ASC ice files, and shipping corridors into a single 1 km grid. A channel-stacked 2D U-Net ingests the previous three days of conditions and predicts the next three days, providing both imagery and machine-readable NetCDF output for dispatchers.
-
-## Key Features
-- Four-day dashboard with day selectors, narrative summaries, and downloadable NetCDF + PNG assets.
-- Shipping route overlay and fast-ice mask derived from shoreline proximity to flag choke points for icebreakers.
-- Automated preprocessing pipeline that reprojects, normalizes, and mosaics all sensors onto a unified polar stereographic grid.
-- Cold-start friendly inference with overlapping patches (stride 128) to maintain fidelity along coastlines and islands.
-- Reproducible training and evaluation scripts tied to checkpoints for rapid experimentation.
-
-## How the Model Works
-1. **Data stacking:** NIC shapefile concentrations, GLSEA SST/ice, HRRR weather surfaces, GEBCO bathymetry, shipping routes, and ASC land masks are rasterized onto a common grid and normalized.
-2. **Temporal context:** For each target forecast, three historical days (T-2, T-1, T0) are concatenated to create a 3×C×H×W tensor.
-3. **2D U-Net:** A depth-wise encoder-decoder with standard 2D convolutions learns spatio-temporal context from the stacked channels with residual skip connections. Loss is masked over land to prevent contamination from missing ocean values.
-4. **Inference:** During evaluation, overlapping 256×256 patches are processed with stride 128, predictions are blended, and outputs are clipped to [0, 100] percent ice concentration.
-5. **Operational layers:** The predicted ice field is combined with fast-ice tagging (ice > 30% within a shoreline buffer) and optional pack-ice risk flags driven by HRRR winds.
-
-## Data Pipeline Summary
-- **Ingest:** Download raw NIC shapefiles, GLSEA NetCDF, HRRR Zarr cubes, GEBCO bathymetry, shipping route shapefiles, and ASC concentration masks.
-- **Reprojection:** Use `pyproj`/`rasterio` to reproject every layer into a 1 km Equal-Area grid aligned to Great Lakes tiles.
-- **Normalization:** Apply per-variable scaling (z-score for temperature, min-max for concentration) and persist stats in `config.py`.
-- **Patch generation:** Assemble sequences of length three, chunk into patches, and serialize training shards.
-- **Augmentation:** Random flips, rotations, coarse dropout over open water, and wind-ice consistency checks.
-- **Serving:** Convert predictions to NetCDF/PNG, create overlays, and push artifacts to `/forecasts` for GitHub Pages.
-
-## Installation
+## Environment setup
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Reproducing Training
+## Training
 ```bash
-python train.py \
-  --config config.py \
-  --data-root /path/to/training_patches \
-  --epochs 150 \
-  --batch-size 4 \
-  --save-dir checkpoints
+python train.py
 ```
-The script loads the 2D U-Net defined in `model.py`, calls dataset builders from `dataset.py`, and writes checkpoints (including `checkpoints/best_model.pth`).
+Edit the constants near the top of `train.py` to point at your data directories before launching. The script loads the `GreatLakesDataset` class, builds overlapping 256×256 patches, applies a land mask inside `masked_loss`, and writes checkpoints under `checkpoints/`.
 
-## Generating a Forecast
+## Forecast generation
 ```bash
 python run_test_forecast.py \
   --config config.py \
@@ -57,70 +31,38 @@ python run_test_forecast.py \
   --shipping-shp data/shipping_routes.shp \
   --output-dir forecasts
 ```
-This reproduces the NetCDF (`submission_forecast_T0_to_T3.nc`) and PNGs (`forecast_T0.png` … `forecast_T3.png`) consumed by the website. Use `visualize.py` to regenerate overlays and PNG storyboards.
+This script rebuilds the inference stack, writes `submission_forecast_T0_to_T3.nc`, and emits daily PNGs consumed by `docs/index.html`. Update `docs/script.js` if you need to surface additional metadata in the dashboard.
 
-> **Binary-safe placeholders:** To keep this template PR-friendly, every `.png` inside `docs/` and `forecasts/` is an ASCII placeholder file and `.gitattributes` forces Git to treat PNGs as UTF-8 text. The GitHub Pages UI automatically falls back to inline SVG previews when these placeholder PNGs are detected. Replace the placeholder files with true binary outputs (and update `.gitattributes` if needed) before sharing operational results.
+## Masks
+- **Land / fast-ice mask**: extracted from GLSEA concentration rasters and ASC land classifications, used for loss weighting, shoreline-fast tagging, and the overlay toggled in `docs/index.html`.
+- **Shipping-route corridors**: buffered shapefiles from the [PHMSA NPMS archive](https://www.npms.phmsa.dot.gov/CNWData.aspx) align with U.S. and Canadian corridors and drive the sampling bias plus the dashboard overlay.
 
-## Running the GitHub Page Locally
-```bash
-cd docs
-python -m http.server 8000
-```
-Navigate to `http://localhost:8000` to interact with the static dashboard. All assets load from the `docs` folder while NetCDF downloads reference `../forecasts`.
+See `utilities.get_land_mask` and `utilities.get_shipping_route_mask` for the reproducible preprocessing steps.
 
-## Data Sources
-- **NOAA National Ice Center (NIC) Ice Charts:** https://usicecenter.gov/Products/ArchiveSearchMulti?table=GLGisKmz&linkChange=gre-two
-- **NOAA GLERL GLSEA Ice & Surface Temperature:** https://apps.glerl.noaa.gov/thredds/catalog/glsea_ice_nc/catalog.html
-- **NOAA HRRR Weather (AWS Public Dataset):** https://registry.opendata.aws/noaa-hrrr-pds/
-- **GEBCO 2023 Bathymetry Grid:** https://www.gebco.net/data_and_products/gridded_bathymetry_data/
-- **Shipping Route Shapefiles:** Provided within the competition dataset release.
-- **ASC Ice Concentration & Land Mask:** https://apps.glerl.noaa.gov/erddap/griddap/GL_Ice_Concentration_GCS.html
-- **Supporting references:** GLSEA archive (https://www.glerl.noaa.gov/emf/data/yyyy_glsea/), GLISA data sources, CoastWatch Great Lakes ice classification, and NOAA/GLERL ERDDAP catalogs.
+## GitHub Pages deployment
+The dashboard in `docs/` is ready to serve directly from GitHub Pages. To publish it:
 
-## Directory Structure
-```
-.
-├── CONTEXT.md
-├── LICENSE
-├── README.md
-├── checkpoints/
-│   └── best_model.pth
-├── config.py
-├── data_loaders.py
-├── data_loaders_test.py
-├── dataset.py
-├── docs/
-│   ├── index.html
-│   ├── script.js
-│   ├── style.css
-│   ├── fast_ice_mask.png
-│   ├── shipping_routes_overlay.png
-│   └── forecast_T{0-3}.png
-├── forecasts/
-│   ├── forecast_T0.png
-│   ├── forecast_T1.png
-│   ├── forecast_T2.png
-│   ├── forecast_T3.png
-│   └── submission_forecast_T0_to_T3.nc
-├── model.py
-├── requirements.txt
-├── run_test_forecast.py
-├── scripts/
-├── train.py
-├── utilities.py
-├── visualize.py
-└── visualize_v2.py
-```
+1. Push the latest changes to the `main` branch so that `docs/` holds the compiled assets (`index.html`, `style.css`, `script.js`, `mask_summary.svg`, etc.).
+2. In the repository **Settings → Pages** panel, choose `main` as the source branch and `docs/` as the folder, then save. (You already selected this combination—double-check that the dropdown now reads “Deploy from a branch: main / docs”.)
+3. Wait for the green “GitHub Pages build and deployment” workflow to finish under **Actions**. You can click the banner that appears on the Pages settings screen to follow the build log.
+4. Visit the published URL shown in the Pages panel (e.g., `https://<org>.github.io/<repo>/`). If you see a 404, force-refresh after a minute; first-time builds can take ~2 minutes to propagate.
+5. When you update the dashboard, repeat step 1; GitHub Pages automatically rebuilds from the newest `docs/` contents.
 
-## Limitations & Future Work
-- Weather-driven pack-ice risk is currently text-only; future iterations will bring HRRR winds client-side.
-- Incorporate SAR-derived ice thickness estimates and classify new/melting/thin/thick regimes.
-- Extend architecture with ConvLSTMs or transformers to capture longer memory.
-- Deploy as a live operational dashboard with rolling ingestion and alerting.
-- Assimilate ice motion vectors to track leads and convergence zones in near real time.
+Optional: add a custom domain or enforce HTTPS in the same Pages settings page once DNS is configured.
+
+## Source datasets
+- **NOAA NIC ice charts (shapefiles)** for situational labels.
+- **NOAA GLERL GLSEA surface temperature & ice** ([link](https://www.glerl.noaa.gov/emf/data/yyyy_glsea_ice/)) for concentration grids, land mask, and fast-ice references.
+- **NOAA HRRR weather archive on AWS** ([link](https://registry.opendata.aws/noaa-hrrr-pds/)) supplying air temperature, winds, and pressure.
+- **GEBCO 2023 bathymetry grid** for static depth context.
+- **Shipping route shapefiles** from the [PHMSA NPMS marine corridor dataset](https://www.npms.phmsa.dot.gov/CNWData.aspx).
+- **ASC ice concentration + land mask (NOAA GLERL)** to reinforce shoreline classes.
+- Optional GLISA + CoastWatch reference archives for manual validation.
+
+## Future work
+- Assimilate Sentinel-1/RCM SAR textures to capture shear and ridging not visible in GLSEA.
+- Fuse altimetry-derived ice-thickness priors once reliable coverage is available.
+- Add lightweight ensemble perturbations to quantify confidence bands for each corridor.
 
 ## License
 Released under the [MIT License](LICENSE).
-
-## Contact
-Questions? Open an issue or email the maintainers at `operations@icecast.dev`.

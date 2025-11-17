@@ -12,16 +12,17 @@
         <p class="eyebrow">Great Lakes Operational Ice Forecast</p>
         <h1>Great Lakes IceCast</h1>
         <p class="subtitle">
-          3-day machine-learning forecast built with NIC, GLSEA, HRRR, GEBCO, and
-          shipping lane data.
+          Three-day ice concentration outlook built from GLSEA concentration grids,
+          NIC shapefiles, HRRR (AWS) forcing, GEBCO bathymetry, and buffered PHMSA
+          shipping corridors.
         </p>
       </div>
       <div class="actions">
         <a class="button" href="../forecasts/submission_forecast_T0_to_T3.nc" download>
-          Download Forecast (NetCDF)
+          Download NetCDF
         </a>
         <a class="button ghost" href="https://github.com/example/glic">
-          View Repository
+          Repository
         </a>
       </div>
     </header>
@@ -54,8 +55,9 @@
           <div id="fastIceOverlay" class="overlay fast-ice" aria-hidden="true"></div>
         </div>
         <p class="placeholder-note">
-          Inline previews appear automatically when placeholder PNG files are kept
-          under <code>/forecasts</code> to avoid committing binaries.
+          Replace the placeholder PNGs in <code>/forecasts</code> before sharing
+          public updates. Only the shipping routes and fast-ice mask overlays
+          render above the imagery.
         </p>
         <div class="narratives">
           <h2>Daily Narrative</h2>
@@ -63,86 +65,87 @@
           <ul class="insights">
             <li id="shippingInsight"></li>
             <li id="fastIceInsight"></li>
-            <li>
-              Pack-ice risk is text-only in this prototype; HRRR winds > 15 kt
-              along Lake Superior's eastern shore trigger cautionary messaging.
-            </li>
+            <li>Pack-ice flags derive from HRRR winds above threshold values.</li>
           </ul>
         </div>
       </section>
 
-      <section class="panel grid">
-        <article>
-          <h3>How it Works</h3>
-          <p>
-            We fuse NIC shapefile ice concentration, GLSEA surface ice & temperature,
-            HRRR temperature/wind/precipitation, GEBCO bathymetry, shipping routes,
-            and an ASC land mask. All datasets are reprojected into a unified 1 km
-            Equal-Area grid, normalized, and stacked into 3-day sequences. A
-            channel-stacked 2D U-Net forecasts the next three days, leveraging
-            overlapping patch inference (256 px with stride 128) and land-masked
-            loss to protect coastal fidelity.
-          </p>
-        </article>
-        <article>
-          <h3>Model Architecture</h3>
-          <p>
-            Encoder-decoder U-Net with 2D convolutions, group norm, and residual
-            skip connections. The network ingests C×H×W tensors built from the
-            most recent three days (stacked across channels), predicts three future
-            frames simultaneously, and blends them with fast-ice tagging (ice > 30%
-            within buffered shoreline) plus optional pack-ice risk flags.
-            Checkpoints live in <code>checkpoints/best_model.pth</code>.
-          </p>
-        </article>
-        <article>
-          <h3>Operational Relevance</h3>
-          <p>
-            Forecasts highlight choke points for USCG icebreakers, shipping lanes
-            vulnerable to consolidation, and areas where fast ice could anchor or
-            break away. The clean visualization improves upon static USNIC charts
-            by overlaying risk layers, providing downloadable NetCDF assets, and
-            delivering higher-resolution machine learning guidance.
-          </p>
-        </article>
-        <article>
-          <h3>Future Work</h3>
-          <ul>
-            <li>Classify new, melting, thin, and thick ice regimes.</li>
-            <li>Estimate ice thickness from SAR fusion.</li>
-            <li>Assimilate ice motion fields and winds for pack-ice drift.</li>
-            <li>Explore ConvLSTM/transformer backbones for longer memory.</li>
-            <li>Create a live operational dashboard with alerts.</li>
-          </ul>
-        </article>
+      <section class="panel">
+        <div class="two-column">
+          <div>
+            <h3>Pipeline</h3>
+            <p>
+              GLSEA concentration and temperature grids, NIC shapefiles, and ASC
+              land classes define the domain plus land/fast-ice mask. HRRR
+              temperature, wind, and pressure fields from the AWS archive are
+              remapped to the GLSEA grid, normalized with GEBCO bathymetry, and
+              stacked with buffered shipping-route channels. Three historical
+              states feed a residual U-Net that predicts the next three days via
+              overlapping 256×256 tiles (stride 128) before mosaicking.
+            </p>
+          </div>
+          <div>
+            <h3>Model inputs & outputs</h3>
+            <ul class="checklist">
+              <li>Three-day GLSEA concentration + temperature history.</li>
+              <li>NIC polygonal concentration flags for supervision.</li>
+              <li>HRRR temperature, wind, and pressure drivers.</li>
+              <li>Static GEBCO bathymetry and shoreline-fast mask.</li>
+              <li>Buffered PHMSA corridor mask for sampling and overlays.</li>
+            </ul>
+            <p>
+              Outputs include three future concentration slices (T+1..T+3) plus
+              the derived overlays and NetCDF bundle served here.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="two-column">
+          <div>
+            <h3>Masks & overlays</h3>
+            <p>
+              The dashboard only displays two overlays: shipping corridors
+              derived from PHMSA NPMS shapefiles and the fast-ice/land mask
+              derived from GLSEA+ASC rasters. Both use the toggles above to help
+              highlight choke points and shoreline attachment zones.
+            </p>
+          </div>
+          <div class="callout">
+            <p>
+              These same masks drive sampling bias during training, suppress land
+              loss, and keep inference consistent with the NetCDF export. Replace
+              the placeholder overlay rasters in <code>docs/</code> before
+              publishing.
+            </p>
+          </div>
+        </div>
       </section>
 
       <section class="panel data">
         <h3>Data Sources</h3>
         <div class="data-columns">
           <ul>
-            <li>NOAA NIC Ice Charts (Shapefiles)</li>
-            <li>NOAA GLERL GLSEA Surface Temperature & Ice</li>
-            <li>NOAA HRRR weather archive (AWS)</li>
-            <li>GEBCO 2023 Bathymetry Grid</li>
+            <li><a href="https://www.natice.noaa.gov/products/icecharts/">NOAA NIC Ice Charts (shapefiles)</a></li>
+            <li><a href="https://www.glerl.noaa.gov/emf/data/yyyy_glsea_ice/">NOAA GLERL GLSEA surface temperature & ice</a></li>
+            <li><a href="https://registry.opendata.aws/noaa-hrrr-pds/">NOAA HRRR weather archive (AWS)</a></li>
+            <li><a href="https://www.gebco.net/data_and_products/gridded_bathymetry_data/gebco_2023/">GEBCO 2023 Bathymetry Grid</a></li>
           </ul>
           <ul>
-            <li>Shipping route shapefiles (competition dataset)</li>
+            <li><a href="https://www.npms.phmsa.dot.gov/CNWData.aspx">PHMSA NPMS shipping route shapefiles</a></li>
             <li>ASC ice concentration + land mask (NOAA GLERL)</li>
-            <li>GLCFS & GLISA reference archives</li>
-            <li>CoastWatch Great Lakes ice classification</li>
+            <li>Optional GLISA + CoastWatch reference archives</li>
           </ul>
         </div>
       </section>
 
       <section class="panel">
-        <h3>Methodology Highlights</h3>
-        <ul class="highlights">
-          <li>Unified grid reprojection and normalization pipeline.</li>
-          <li>Automated cold-start strategy by seeding with climatology.</li>
-          <li>Overlapping patch inference (stride 128) for seamless mosaics.</li>
-          <li>Land-masked loss function to avoid coastal artifacts.</li>
-          <li>Fast-ice vs. pack-ice tagging plus shipping overlays.</li>
+        <h3>Future Improvements</h3>
+        <ul class="checklist">
+          <li>Blend Sentinel-1/RCM SAR texture metrics for ridge detection.</li>
+          <li>Assimilate altimetry-derived thickness priors when available.</li>
+          <li>Run lightweight ensembles to produce corridor-specific confidence bands.</li>
         </ul>
       </section>
     </main>

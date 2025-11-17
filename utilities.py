@@ -1,6 +1,3 @@
-#
-# THIS IS THE FULL, CORRECT utilities.py (v3 - Shipping Mask & CRS Fix)
-#
 import traceback
 import xarray as xr
 import rioxarray
@@ -9,7 +6,6 @@ import numpy as np
 import datetime
 import warnings
 
-# NEW IMPORTS
 import geopandas as gpd
 from rasterio import features
 from rasterio.transform import from_bounds
@@ -97,7 +93,6 @@ def get_shipping_route_mask(master_grid: xr.DataArray) -> xr.DataArray:
     
     height, width = len(master_grid['y']), len(master_grid['x'])
     
-    # --- THIS IS THE FIX ---
     # We must re-project to a CRS that uses METERS for buffering.
     print(f"  > Projecting routes to {config.ICE_ASC_NATIVE_CRS} (meters) for buffering...")
     routes_gdf_proj = routes_gdf.to_crs(config.ICE_ASC_NATIVE_CRS)
@@ -109,7 +104,6 @@ def get_shipping_route_mask(master_grid: xr.DataArray) -> xr.DataArray:
     # Project back to the master grid CRS (EPSG:4326)
     print(f"  > Projecting buffered routes back to {master_grid.rio.crs}...")
     shapes = shapes_proj.to_crs(master_grid.rio.crs)
-    # --- END FIX ---
 
     print("Rasterizing shipping routes to master grid...")
     with warnings.catch_warnings():
