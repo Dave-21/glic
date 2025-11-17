@@ -1,6 +1,3 @@
-#
-# THIS IS THE FULL, CORRECT dataset.py (v9 - Biased Sampling Fix)
-#
 import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
@@ -18,29 +15,23 @@ from rasterio.transform import from_bounds
 from concurrent.futures import ThreadPoolExecutor
 import json 
 from tqdm import tqdm
-import warnings # <-- Added for warnings
+import warnings
 
 import config
 from config import HRRR_VARS
-# --- [FIX 1/5] Corrected Import Order ---
-# utilities must be imported BEFORE data_loaders to fix the circular dependency
 import utilities
 import data_loaders
 from data_loaders import get_glsea_ice_data, get_gebco_data
-# ----------------------------------------
 
-# --- Dataset Constants ---\
 PATCH_SIZE = 256
 
-# --- Channel Definitions ---\
 N_INPUT_STATE_CHANNELS = 2    # (Ice_T0, DeltaIce)
-N_WEATHER_CHANNELS = len(HRRR_VARS)     # 4 channels
-N_GLSEA_CHANNELS = 1          # (Water Temp ONLY)
-N_STATIC_CHANNELS = 2         # 1 channel (shipping routes), 1 channel (GEBCO)
+N_WEATHER_CHANNELS = len(HRRR_VARS)
+N_GLSEA_CHANNELS = 1
+N_STATIC_CHANNELS = 2
 N_INPUT_CHANNELS = N_INPUT_STATE_CHANNELS + N_WEATHER_CHANNELS + N_GLSEA_CHANNELS + N_STATIC_CHANNELS
-N_OUTPUT_CHANNELS = 1 # (Ice_T1)
+N_OUTPUT_CHANNELS = 1
 
-# --- [FIX 2/5] Updated GreatLakesDataset Class ---
 class GreatLakesDataset(Dataset):
     """
     PyTorch Dataset for loading Great Lakes ice and weather data.
@@ -64,7 +55,6 @@ class GreatLakesDataset(Dataset):
         self.is_train = is_train
         self.patch_size = PATCH_SIZE
         
-        # --- 1. Load Core Data ---
         print("Loading core datasets into memory...")
         # This loads the full 3D+time data (time, y, x)
         self.glsea_data = data_loaders.get_glsea_ice_data()
@@ -72,7 +62,6 @@ class GreatLakesDataset(Dataset):
         # This loads the 2D static data (y, x)
         self.gebco_data = data_loaders.get_gebco_data()
         
-        # --- 2. Define Master Grid & Masks ---
         print("Loading master grid and static masks...")
         # Get the 2D (y, x) master grid definition
         self.master_grid_2d = utilities.get_master_grid_definition()
@@ -81,7 +70,6 @@ class GreatLakesDataset(Dataset):
         self.land_mask = utilities.get_land_mask(self.master_grid_2d)
         self.shipping_mask = utilities.get_shipping_route_mask(self.master_grid_2d)
         
-        # --- 3. Calculate Valid Pixel Indices for Sampling ---
         print("Calculating valid sampling indices...")
         
         # Find all pixels that are water (land_mask == 0)
@@ -98,21 +86,18 @@ class GreatLakesDataset(Dataset):
         if self.is_train and len(self.shipping_route_indices) == 0:
             print("WARNING: No shipping route pixels found! Biased sampling will be disabled.")
 
-        # --- 4. Prepare Static Data Channels ---
         # Combine static channels into one (N_STATIC_CHANNELS, H, W) array
         self.static_data = xr.concat(
             [self.shipping_mask, self.gebco_data],
             dim=pd.Index(["shipping_routes", "gebco"], name="channel")
         ).values.astype(np.float32) # (2, H, W)
         
-        # --- 5. Prepare Time-Varying Data ---
         print("Aligning time-varying data...")
         self.available_dates = self._get_available_dates()
         
         # This will hold the (time, 4, H, W) weather data
         self.hrrr_data = None
         
-        # --- 6. Handle Weather Data & Normalization ---
         # We pre-load all weather data for the entire date range
         # and calculate stats if they aren't provided.
         print("Loading all weather data (this may take a moment)...")
@@ -214,7 +199,6 @@ class GreatLakesDataset(Dataset):
     def __len__(self) -> int:
         return len(self.available_dates)
 
-    # --- [FIX 3/5] New Helper for Biased Patch Sampling ---
     def _get_patch_center(self) -> Tuple[int, int]:
         """
         Selects the center pixel (y, x) for a new patch.
@@ -242,7 +226,6 @@ class GreatLakesDataset(Dataset):
             
         return y, x
 
-    # --- [FIX 4/5] Updated __getitem__ Method ---
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """
         Gets a single training/validation sample.
@@ -251,7 +234,6 @@ class GreatLakesDataset(Dataset):
         The spatial patch location is chosen randomly.
         """
         
-        # --- 1. Select Date (T) ---
         # idx maps to our list of available dates
         date_T = self.available_dates[idx]
         
@@ -260,11 +242,9 @@ class GreatLakesDataset(Dataset):
         idx_T_minus_1 = idx_T - 1
         idx_T_plus_1 = idx_T + 1
         
-        # --- 2. Select Patch Center (y, x) ---
         # This now uses our biased sampling logic
         patch_center_y, patch_center_x = self._get_patch_center()
         
-        # --- 3. Define Patch Boundaries ---
         half_patch = self.patch_size // 2
         
         # Calculate slices, clamping to array boundaries
@@ -278,7 +258,6 @@ class GreatLakesDataset(Dataset):
         
         patch_slice = (slice(y_start, y_end), slice(x_start, x_end))
         
-        # --- 4. Extract Input Channels (X) ---
         
         # a) Input State (Ice T-1, Delta Ice)
         ice_T0 = self.glsea_data.isel(time=idx_T).values[patch_slice]
@@ -298,7 +277,6 @@ class GreatLakesDataset(Dataset):
         # d) Static Channels (2 channels)
         static_patch = self.static_data[:, y_start:y_end, x_start:x_end]
 
-        # --- 5. Combine all input channels ---
         # (N_INPUT_CHANNELS, H, W)
         x_channels = [
             ice_T0[np.newaxis, ...],             # Channel 0
@@ -311,20 +289,16 @@ class GreatLakesDataset(Dataset):
         # Note: Need to handle `weather_T` which is already (C, H, W)
         x = np.concatenate(x_channels, axis=0).astype(np.float32)
 
-        # --- 6. Extract Target (Y) ---
         # Target is ice concentration at T+1
         y = self.glsea_data.isel(time=idx_T_plus_1).values[patch_slice]
         y = y[np.newaxis, ...].astype(np.float32) # (1, H, W)
         
-        # --- 7. Extract Land Mask ---
         mask = self.land_mask.values[patch_slice]
         mask = mask[np.newaxis, ...].astype(np.float32) # (1, H, W)
 
-        # --- 8. Data Augmentation (Training only) ---
         if self.is_train:
             x, y, mask = self._augment(x, y, mask)
 
-        # --- 9. Convert to Tensors ---
         return {
             'date': str(date_T),
             'x': torch.from_numpy(x),
@@ -350,7 +324,6 @@ class GreatLakesDataset(Dataset):
             
         return x, y, mask
 
-# --- [FIX 5/5] Updated __main__ for easier debugging ---
 if __name__ == "__main__":
     print("--- Running dataset.py in debug mode ---")
     
@@ -390,7 +363,6 @@ if __name__ == "__main__":
                 print(f"  Y shape: {batch['y'].shape}")
                 print(f"  Mask shape: {batch['land_mask'].shape}")
                 
-                # --- Quick Stats Check ---
                 print(f"  X Min: {batch['x'].min():.2f}, Max: {batch['x'].max():.2f}, Mean: {batch['x'].mean():.2f}")
                 print(f"  Y Min: {batch['y'].min():.2f}, Max: {batch['y'].max():.2f}, Mean: {batch['y'].mean():.2f}")
                 print(f"  Mask Min: {batch['mask'].min():.2f}, Max: {batch['mask'].max():.2f}, Mean: {batch['mask'].mean():.2f}")
