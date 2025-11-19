@@ -151,6 +151,7 @@
 
         narrativeTitle.textContent = data.title;
         narrativeText.textContent = data.narrative;
+        shippingInsight.textContent = data.shipping;
         
         // Force reload image
         forecastImage.src = `${data.image}?t=${new Date().getTime()}`;
