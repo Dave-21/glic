@@ -1,28 +1,64 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-color-mode="dark" data-dark-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Great Lakes IceCast</title>
-    <link rel="stylesheet" href="style.css" />
+    <title>Great Lakes IceCast | Commander's Dashboard</title>
+    
+    <!-- 1. LOAD DATA DIRECTLY (No Fetch) -->
+    <script src="../forecasts/forecast_data.js"></script>
+
+    <style>
+      :root { --bg: #050c16; --panel: #0e1b2b; --border: #1e2d44; --accent: #4ad6ff; --text: #ecf6ff; --muted: #9fb3c8; --highlight: #f5a623; --font: "Inter", "Segoe UI", system-ui, sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.6; padding: 2rem 1rem 4rem; }
+      header, main, footer { max-width: 1100px; margin: 0 auto; }
+      header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; margin-bottom: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; }
+      .eyebrow { text-transform: uppercase; letter-spacing: 0.15em; color: var(--accent); font-size: 0.75rem; font-weight: 700; margin: 0 0 0.25rem; }
+      h1 { margin: 0; font-size: 1.75rem; letter-spacing: -0.02em; }
+      .subtitle { color: var(--muted); max-width: 600px; font-size: 0.95rem; margin-top: 0.5rem; }
+      .actions { display: flex; gap: 0.75rem; align-items: center; }
+      .button { background: var(--accent); color: #041321; padding: 0.6rem 1.25rem; border-radius: 6px; font-weight: 600; text-decoration: none; font-size: 0.9rem; transition: all 0.2s; }
+      .button:hover { filter: brightness(1.1); transform: translateY(-1px); }
+      .button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+      .button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+      .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); }
+      .controls { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; align-items: center; background: rgba(0,0,0,0.2); padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); }
+      .day-buttons { display: flex; gap: 0.5rem; }
+      .day-buttons button { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; font-family: var(--font); font-weight: 500; transition: all 0.2s; }
+      .day-buttons button:hover { color: var(--text); border-color: var(--text); }
+      .day-buttons button.active { background: var(--accent); color: #041321; border-color: var(--accent); font-weight: 700; }
+      .toggles { display: flex; gap: 1.5rem; }
+      .toggles label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: var(--text); cursor: pointer; }
+      input[type="checkbox"] { accent-color: var(--accent); }
+      .map-wrapper { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: #000; aspect-ratio: 1 / 1; max-height: 650px; margin: 0 auto; }
+      .map-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; transition: opacity 0.3s ease; }
+      .narratives { margin-top: 1.5rem; border-top: 1px solid var(--border); padding-top: 1.5rem; }
+      .narratives h2 { margin-top: 0; font-size: 1.2rem; color: var(--accent); }
+      .insights-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+      .insight-card { background: rgba(255,255,255,0.03); padding: 1rem; border-radius: 8px; border-left: 3px solid var(--highlight); }
+      .insight-card h3 { margin: 0 0 0.5rem 0; font-size: 0.85rem; color: var(--muted); text-transform: uppercase; }
+      .insight-card p { margin: 0; font-size: 0.95rem; }
+      footer { text-align: center; color: var(--muted); font-size: 0.85rem; margin-top: 4rem; border-top: 1px solid var(--border); padding-top: 2rem; }
+      @media (max-width: 640px) { .actions { width: 100%; } .button { width: 100%; text-align: center; } .insights-grid { grid-template-columns: 1fr; } }
+      .tech-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+      .tech-item h3 { font-size: 1rem; color: var(--text); border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+      .tech-item p { font-size: 0.9rem; color: var(--muted); }
+      .data-list { list-style: none; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.85rem; color: var(--muted); }
+      .data-list li::before { content: "•"; color: var(--accent); margin-right: 0.5rem; }
+    </style>
   </head>
   <body>
     <header>
       <div>
-        <p class="eyebrow">Great Lakes Operational Ice Forecast</p>
-        <h1>Great Lakes IceCast</h1>
+        <p class="eyebrow">USCG Operation Taconite Support</p>
+        <h1>GL-Ice-Vision Dashboard</h1>
         <p class="subtitle">
-          Three-day ice concentration outlook generated from GLSEA ice grids,
-          HRRR weather drivers, GEBCO bathymetry, and buffered shipping-route masks.
+          AI-Driven 3-Day Ice Concentration Forecast.
         </p>
       </div>
       <div class="actions">
-        <a class="button" href="../forecasts/submission_forecast_T0_to_T3.nc" download>
-          Download NetCDF
-        </a>
-        <a class="button ghost" href="https://github.com/example/glic">
-          Repository
-        </a>
+        <a class="button" href="../forecasts/submission_forecast.nc" download>Download NetCDF</a>
       </div>
     </header>
 
@@ -30,125 +66,97 @@
       <section class="panel">
         <div class="controls">
           <div class="day-buttons">
-            <button data-day="T0" class="active">T0 (Initial)</button>
+            <button data-day="T0" class="active">T-Zero (Today)</button>
             <button data-day="T1">T+1</button>
             <button data-day="T2">T+2</button>
             <button data-day="T3">T+3</button>
           </div>
-          <div class="toggles">
-            <label>
-              <input type="checkbox" id="shippingToggle" checked /> Shipping routes
-            </label>
-            <label>
-              <input type="checkbox" id="fastIceToggle" checked /> Fast-ice mask
-            </label>
-          </div>
         </div>
+
         <div class="map-wrapper">
-          <img
-            id="forecastImage"
-            src="../forecasts/forecast_T0.png"
-            alt="Ice concentration forecast"
-          />
-          <div id="shippingOverlay" class="overlay shipping" aria-hidden="true"></div>
-          <div id="fastIceOverlay" class="overlay fast-ice" aria-hidden="true"></div>
+          <img id="forecastImage" class="map-layer" src="../forecasts/forecast_T0.png" alt="Ice Forecast" />
         </div>
-        <p class="placeholder-note">
-          Replace the placeholder PNGs in <code>/forecasts</code> before sharing
-          public updates.
-        </p>
+
         <div class="narratives">
-          <h2>Daily Narrative</h2>
-          <p id="narrativeText"></p>
-          <ul class="insights">
-            <li id="shippingInsight"></li>
-            <li id="fastIceInsight"></li>
-            <li>Pack-ice flags derive from HRRR winds above threshold values.</li>
-          </ul>
-        </div>
-      </section>
-
-      <section class="panel grid">
-        <article>
-          <h3>How it Works</h3>
-          <p>
-            GLSEA ice concentration grids define the analysis domain and land mask.
-            HRRR air temperature, winds, and pressure fields plus GEBCO bathymetry
-            are resampled onto the same grid, normalized, and stacked with buffered
-            shipping-route masks. Three past days feed a 2D U-Net that predicts the
-            next three days on overlapping patches (256 px tiles, stride 128).
-          </p>
-        </article>
-        <article>
-          <h3>Model Architecture</h3>
-          <p>
-            Encoder-decoder U-Net with residual skip connections and group
-            normalization. Inputs contain stacked state, weather, and static
-            channels; outputs return three future concentration slices. Land-masked
-            loss weighting avoids penalizing terrestrial pixels. Checkpoints live
-            under <code>checkpoints/</code>.
-          </p>
-        </article>
-        <article>
-          <h3>Operational Relevance</h3>
-          <p>
-            Outputs summarize expected choke points along the USCG corridors and
-            highlight fast-ice attachment zones derived from shoreline buffers. NetCDF
-            packages plus PNGs mirror the format used by the static dashboard.
-          </p>
-        </article>
-      </section>
-
-      <section class="panel mask">
-        <div class="mask-copy">
-          <h3>Mask coverage</h3>
-          <p>
-            The land mask (from GLSEA) counts 989,894 land pixels and 143,682 water
-            pixels on the latest ingest. Buffered NOAA shipping routes flag 78,053
-            pixels used for biased sampling and overlay generation.
-          </p>
-        </div>
-        <div class="mask-image">
-          <img src="mask_summary.svg" alt="Mask coverage summary" />
-        </div>
-      </section>
-
-      <section class="panel data">
-        <h3>Data Sources</h3>
-        <div class="data-columns">
-          <ul>
-            <li>NOAA NIC Ice Charts (Shapefiles)</li>
-            <li>NOAA GLERL GLSEA Surface Temperature & Ice</li>
-            <li>NOAA HRRR weather archive (AWS)</li>
-            <li>GEBCO 2023 Bathymetry Grid</li>
-          </ul>
-          <ul>
-            <li>Shipping route shapefiles (competition dataset)</li>
-            <li>ASC ice concentration + land mask (NOAA GLERL)</li>
-            <li>Optional GLISA + CoastWatch reference archives</li>
-          </ul>
+          <h2 id="narrativeTitle">Initializing...</h2>
+          <p id="narrativeText">Waiting for data...</p>
+          
+          <div class="insights-grid">
+            <div class="insight-card" style="border-color: #f5a623;">
+              <h3>Shipping Corridor Status</h3>
+              <p id="shippingInsight">--</p>
+            </div>
+          </div>
         </div>
       </section>
 
       <section class="panel">
-        <h3>Methodology Notes</h3>
-        <ul class="highlights">
-          <li>Unified grid reprojection and normalization.</li>
-          <li>Overlapping patch inference (stride 128).</li>
-          <li>Land-masked loss to avoid coastal artifacts.</li>
-          <li>Fast-ice tagging via shoreline buffers.</li>
-        </ul>
+        <div class="tech-grid">
+          <article class="tech-item">
+            <h3>System Architecture</h3>
+            <p>
+              GL-Ice-Vision ingests 9 channels of data: historical GLSEA ice grids, 
+              HRRR weather drivers (Wind/Temp/Precip), and static bathymetry/route masks. 
+              A 3D-aware U-Net predicts pixel-wise concentration for the next 72 hours.
+            </p>
+          </article>
+          <article class="tech-item">
+            <h3>Data Sources</h3>
+            <ul class="data-list">
+              <li>NOAA GLSEA (Ice/Temp)</li>
+              <li>NOAA HRRR (Weather)</li>
+              <li>GEBCO (Bathymetry)</li>
+              <li>USNIC (Shapefiles)</li>
+            </ul>
+          </article>
+        </div>
       </section>
     </main>
 
     <footer>
-      <p>
-        © 2024 Great Lakes IceCast. Data courtesy NOAA NIC, GLERL, HRRR, GEBCO.
-        Not for real-world navigation.
-      </p>
-      <p>Contact: operations@icecast.dev · MIT License</p>
+      <p><strong>GL-Ice-Satellite-Vision</strong> | MiSpace Hackathon 2025</p>
     </footer>
 
-    <script src="script.js"></script>
+    <script>
+      // --- MAIN LOGIC ---
+      const dayButtons = document.querySelectorAll('.day-buttons button');
+      const forecastImage = document.getElementById('forecastImage');
+      const narrativeTitle = document.getElementById('narrativeTitle');
+      const narrativeText = document.getElementById('narrativeText');
+
+      function initializeDashboard() {
+        // Check if global data exists
+        if (typeof window.forecastData === 'undefined') {
+            narrativeTitle.textContent = "Data Load Error";
+            narrativeText.textContent = "Could not find 'forecast_data.js'. Please run generate_visualizations.py";
+            return;
+        }
+
+        // Bind Click Handlers
+        dayButtons.forEach(btn => {
+            btn.addEventListener('click', () => updateDay(btn.dataset.day));
+        });
+        
+        // Init
+        updateDay('T0');
+      }
+
+      function updateDay(dayKey) {
+        const data = window.forecastData[dayKey];
+        if (!data) return;
+
+        dayButtons.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.day === dayKey);
+        });
+
+        narrativeTitle.textContent = data.title;
+        narrativeText.textContent = data.narrative;
+        
+        // Force reload image
+        forecastImage.src = `${data.image}?t=${new Date().getTime()}`;
+      }
+
+      initializeDashboard();
+    </script>
   </body>
 </html>

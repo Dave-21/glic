@@ -1,52 +1,63 @@
-# Great Lakes IceCast
+# **Great Lakes IceCaster** (GLIC)
 
-Deterministic 2D U-Net workflow for Great Lakes ice concentration forecasts. The project aligns NOAA GLSEA ice/temperature grids, HRRR weather drivers, GEBCO bathymetry, a GLSEA-derived land mask, and buffered shipping-route masks into a single training/inference stack.
+A deep learning pipeline for 3-day Great Lakes ice concentration forecasting. This system ingests GLSEA ice/temp grids, HRRR weather drivers, and GEBCO bathymetry to produce pixel-wise forecasts and automated operational narratives for the USCG.
 
-## Repository layout
-- `dataset.py`, `data_loaders.py`, `utilities.py`: assemble tensors, apply land and shipping-route masks, and expose helper functions used by training and inference scripts.
-- `model.py`: U-Net backbone used in `train.py` and `run_test_forecast.py`.
-- `docs/`: static dashboard (HTML/CSS/JS) plus supporting notes for GitHub Pages.
-- `forecasts/`: placeholder NetCDF/PNG outputs expected by the dashboard. Replace with real forecasts before publishing.
+## **Repository Structure**
 
-## Environment setup
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+* **model.py**: Custom 2D U-Net architecture with 9 input channels.  
+* **train.py**: Training loop with mixed-precision (amp) and masked loss (ignores land pixels).  
+* **dataset.py**: PyTorch Dataset implementation with caching, normalization, and biased sampling (prioritizing ice/shipping lanes).  
+* **data\_loaders.py**: Geospatial data handling (xarray/rioxarray) for GLSEA, HRRR, and GEBCO.  
+* **utilities.py**: Helper functions for master grid definition, land masking, and shipping route rasterization.  
+* **visualize\_forecast\_submission.py**: The main inference engine. Generates the submission NetCDF, dashboard images, and auto-generated narrative.  
+* **visualize\_forecast\_debug.py**: Tool for debugging individual model predictions and layers.  
+* **config.py**: Central configuration for file paths, grid CRS (EPSG:4326), and model hyperparameters.  
+* **setup.py**: Automated script to download public datasets and configure directory structure.
 
-## Training
-```bash
+## **Setup**
+
+1. Environment  
+   Create the conda environment:  
+   conda env create \-f environment.yml  
+   conda activate glic\_env
+
+2. Data Initialization  
+   Run the setup script to create directories and download public data (GLSEA, Shipping Routes):  
+   python setup.py
+
+   *Note: You must manually place the contest "Test Data" into the datasets/ folder as prompted by the script.*
+
+## **Usage**
+
+### **1\. Training**
+
+Train the U-Net model. This will generate a checkpoint in checkpoints/best\_model.pth and calculate weather statistics (weather\_stats.json).
+
 python train.py
-```
-Edit the constants near the top of `train.py` to point at your data directories before launching. The script loads the `GreatLakesDataset` class, builds overlapping 256×256 patches, applies a land mask inside `masked_loss`, and writes checkpoints under `checkpoints/`.
 
-## Forecast generation
-```bash
-python run_test_forecast.py \
-  --config config.py \
-  --hrrr-root /data/hrrr \
-  --nic-root /data/nic \
-  --glsea-root /data/glsea \
-  --shipping-shp data/shipping_routes.shp \
-  --output-dir forecasts
-```
-This script rebuilds the inference stack, writes `submission_forecast_T0_to_T3.nc`, and emits daily PNGs consumed by `docs/index.html`. Update `docs/script.js` if you need to surface additional metadata in the dashboard.
+### **2\. Generate Forecast & Submission**
 
-## Mask summary
-Land and route masks originate from GLSEA ice concentration rasters and buffered NOAA shipping-route shapefiles. Counts (from the latest processed scene) are:
+Run the full inference pipeline using the **Test Data**. This script:
 
-- Land mask: 989,894 land pixels / 143,682 water pixels.
-- Route mask: 78,053 pixels flagged within the buffered corridors.
+* Loads the specific test files (T0 Initial Conditions \+ Weather).  
+* Runs the model for T+1, T+2, and T+3.  
+* Generates the CF-Compliant NetCDF (forecasts/submission\_forecast.nc).  
+* Performs auto-analysis on 30+ strategic regions to generate the narrative.  
+* Outputs map visualizations.
 
-Refer to `utilities.get_land_mask` and `utilities.get_shipping_route_mask` for the reproducible workflow. Replace the placeholder overlays in `docs/fast_ice_mask.png` and `docs/shipping_routes_overlay.png` with real exports prior to release.
+python visualize\_forecast\_submission.py
 
-## Data sources
-- NOAA National Ice Center charts
-- NOAA GLERL GLSEA NetCDF archive
-- NOAA HRRR (AWS public dataset)
-- GEBCO 2023 bathymetry grid
-- Shipping route shapefiles supplied with the challenge dataset
+### **3\. View Dashboard**
 
-## License
-Released under the [MIT License](LICENSE).
+Open docs/index.html in any web browser to view the interactive, data-driven Commander's Dashboard.
+
+## **Methodology**
+
+* **Input:** 9-Channel Tensor (Ice T0, Ice Delta, HRRR \[Temp, Wind U/V, Precip\], Water Temp, Bathymetry, Shipping Mask).  
+* **Architecture:** 2D U-Net with 64 filters, GroupNorm, and residual connections.  
+* **Loss:** Masked MSE (calculated only on water pixels).  
+* **Analysis:** The system dynamically scans pixel arrays for specific ROIs (Whitefish Bay, Mackinac, etc.) to trigger operational warnings in the narrative.
+
+## **License**
+
+MIT License

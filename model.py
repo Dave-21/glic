@@ -33,7 +33,7 @@ class DownBlock(nn.Module):
     def forward(self, x):
         x_pooled = self.pool(x)
         x_conv = self.conv(x_pooled)
-        return x_conv, x_pooled # Return pooled for skip (this is slightly different, just pass x_conv)
+        return x_conv, x_pooled # Return pooled for skip
     
     def forward(self, x):
         x = self.pool(x)
@@ -48,10 +48,8 @@ class UpBlock(nn.Module):
         super().__init__()
         # in_channels is for the skip connection + upsampled feature map
 
-        # --- BUG ---
         # self.up = nn.ConvTranspose2d(in_channels // 2, in_channels // 2, kernel_size=2, stride=2)
 
-        # --- FIX ---
         # The input tensor (x_up) has 2/3 of the total combined channels (e.g., 1024 in a 1536 total).
         # The output of this layer should also have 2/3 of the channels, to be concatenated
         # with the skip connection (which has 1/3 of the channels).

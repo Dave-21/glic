@@ -1,6 +1,4 @@
-#
-# THIS IS THE FULL, CORRECT data_loaders.py (v5 - HRRR Guide Option 3)
-#
+import torch
 import xarray as xr
 import rioxarray
 from rasterio.enums import Resampling
@@ -11,29 +9,28 @@ import glob
 from typing import List, Dict
 import pandas as pd
 import re
-
 import s3fs
 import zarr
 import geopandas as gpd
 from rasterio import features
 from rasterio.transform import from_bounds
 import warnings
-import metpy  # <-- NEW: For projection handling
-import cartopy.crs as ccrs # <-- NEW: For projection handling
+import metpy
+import cartopy.crs as ccrs
 from tqdm import tqdm
 import os
 import bathyreq
 import traceback
-
 import config
-import utilities # <-- Make sure utilities is imported
+import utilities
+
 
 # --- Cache Variables ---
 _hrrr_day_cache = {}
 _nic_ice_data_cache = None
-_hrrr_grid_cache = None # <-- NEW: Cache for the HRRR grid
-_glsea_ice_data_cache = None # <-- NEW: Cache for GLSEA ice data
-_gebco_data_cache = None # <-- NEW: Cache for GEBCO bathymetry data
+_hrrr_grid_cache = None
+_glsea_ice_data_cache = None
+_gebco_data_cache = None
 
 # --- HRRR Projection (from HRRR Guide) ---
 HRRR_PROJECTION = ccrs.LambertConformal(
@@ -43,7 +40,7 @@ HRRR_PROJECTION = ccrs.LambertConformal(
     globe=ccrs.Globe(semimajor_axis=6371229, semiminor_axis=6371229)
 )
 
-def load_hrrr_data_for_day(target_date: datetime.date) -> xr.Dataset | None:
+def load_hrrr_data_for_day(target_date: datetime.date, master_grid: xr.DataArray) -> xr.Dataset | None:
     """
     Loads HRRR data for a single day from the S3 Zarr archive and reprojects it.
     This version is robust to format changes over time by loading coordinates
@@ -71,7 +68,7 @@ def load_hrrr_data_for_day(target_date: datetime.date) -> xr.Dataset | None:
             try:
                 var_group = store[group_path]
 
-                # --- START: FIX 5 - LOAD COORDINATES FROM GROUP ---
+                # --- LOAD COORDINATES FROM GROUP ---
                 if ds_grid is None:
                     #print(f"  > Initializing coordinate system from group: {group_path}")
                     
@@ -98,7 +95,6 @@ def load_hrrr_data_for_day(target_date: datetime.date) -> xr.Dataset | None:
                     ds_grid_with_crs.rio.write_crs(HRRR_PROJECTION.proj4_init, inplace=True)
                     ds_grid_with_crs.rio.set_spatial_dims("x", "y", inplace=True)
                     
-                    # --- THIS IS THE FIX ---
                     # Manually calculate the transform instead of inferring
                     #print("  > Manually calculating HRRR grid transform...")
                     transform = from_bounds(
@@ -110,14 +106,12 @@ def load_hrrr_data_for_day(target_date: datetime.date) -> xr.Dataset | None:
                         height=len(ds_grid_with_crs['y'])
                     )
                     ds_grid_with_crs.rio.write_transform(transform, inplace=True)
-                    # --- END FIX ---
                     
                     ds_grid = ds_grid_with_crs
                     ds_grid.load()
                     #print(f"  > Coordinate system loaded. CRS: {ds_grid.rio.crs}")
-                # --- END: FIX 5 ---
 
-                # --- START: FIX 3 - ROBUST ZARR ARRAY FINDER (Correct) ---
+                # --- ROBUST ZARR ARRAY FINDER ---
                 short_name = group_path.split('/')[-1] 
                 base_name = group_path.split('/')[0]   
                 var_array = None
@@ -142,9 +136,7 @@ def load_hrrr_data_for_day(target_date: datetime.date) -> xr.Dataset | None:
                 
                 if var_array is None:
                     raise KeyError(f"Could not find data array in known locations for {group_path}")
-                # --- END: FIX 3 ---
 
-                # --- START: FIX 4 - HANDLE 2D vs 3D ARRAYS (Correct) ---
                 #print(f"  > Array found. Shape: {var_array.shape}, Dims: {var_array.ndim}")
                 
                 if var_array.ndim == 3:
@@ -155,7 +147,6 @@ def load_hrrr_data_for_day(target_date: datetime.date) -> xr.Dataset | None:
                     var_data = var_array[:].astype(np.float32)
                 else:
                     raise ValueError(f"Unexpected array shape for {array_path_for_logging}")
-                # --- END: FIX 4 ---
                 
                 coords = {'y': ds_grid['y'], 'x': ds_grid['x']}
                 dims = ['y', 'x']
@@ -181,20 +172,15 @@ def load_hrrr_data_for_day(target_date: datetime.date) -> xr.Dataset | None:
         # 4. Merge with the coordinate/grid dataset
         ds_with_coords = xr.merge([ds_at_12utc, ds_grid])
 
-        # --- This line is CRITICAL and now restored ---
-        # Because `ds_grid.rio.crs` is now valid (from FIX 8),
-        # this line will work as intended.
+        # Because `ds_grid.rio.crs` is now valid
         ds_with_coords.rio.write_crs(ds_grid.rio.crs, inplace=True)
-        # --- End Critical Line ---
 
         # 5. Reproject to Master Grid.
-        master_grid = utilities.get_master_grid_definition()
         
         #print(f"Reprojecting HRRR for {target_date} to master grid...")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=FutureWarning)
             
-            # --- FINAL FIX: Variable-specific resampling ---
             # We must iterate *only* over the weather variables from config,
             # not all data_vars (which includes 'metpy_crs').
             
@@ -222,19 +208,16 @@ def load_hrrr_data_for_day(target_date: datetime.date) -> xr.Dataset | None:
                     resampling=resampling_method
                 )
                 
-                # --- THIS IS THE CRITICAL FIX ---
                 if var_name == 'precip_surface':
                     # Clip all negative values (artifacts from reprojection) to 0.0
                     var_reprojected = var_reprojected.clip(min=0.0)
                     #print(f"  > Clipping negative precipitation artifacts.")
-                # --- END CRITICAL FIX ---
 
                 reprojected_vars.append(var_reprojected)
 
             # Merge the reprojected variables back into one dataset
             #ds_reprojected = xr.merge(reprojected_vars)
             ds_reprojected = xr.merge(reprojected_vars, compat='override')
-            # --- END FINAL FIX ---
 
         ds_reprojected["time"] = pd.to_datetime(target_date) # Add date for caching
         
@@ -249,145 +232,6 @@ def load_hrrr_data_for_day(target_date: datetime.date) -> xr.Dataset | None:
         print(f"    URL: {zarr_url}")
         print(f"    Error: {e}")
         return None
-
-def load_nic_ice_data_from_shapefiles() -> xr.DataArray:
-    """
-    Loads and rasterizes all NIC ice data shapefiles from the training directory
-    into a single, time-sorted xarray DataArray.
-    """
-    global _nic_ice_data_cache
-    
-    # 1. Memory Cache Check (For the current program run)
-    if _nic_ice_data_cache is not None:
-        print("NIC ice data retrieved from memory cache.")
-        return _nic_ice_data_cache.copy()
-
-    # 2. Disk Cache Check (For runs after the program restarts)
-    if config.TRAIN_NIC_CACHE_FILE.exists():
-        print(f"Loading NIC ice data from disk cache: {config.TRAIN_NIC_CACHE_FILE}")
-        try:
-            with xr.open_dataset(config.TRAIN_NIC_CACHE_FILE) as ds:
-                _nic_ice_data_cache = ds.load()
-                print("NIC ice data load complete from disk cache.")
-                return _nic_ice_data_cache['ice_conc']
-        except Exception as e:
-            print(f"Error loading cache file ({e}), re-running expensive computation.")
-    
-    shp_files = sorted(list(config.TRAIN_NIC_SHP_DIR.glob("*.shp")))
-    if not shp_files:
-        raise FileNotFoundError(f"No .shp files found in {config.TRAIN_NIC_SHP_DIR}")
-
-    master_grid = utilities.get_master_grid_definition()
-    height, width = len(master_grid['y']), len(master_grid['x'])
-    
-    transform = from_bounds(
-        master_grid['x'].min(), master_grid['y'].min(),
-        master_grid['x'].max(), master_grid['y'].max(),
-        width - 1, height - 1
-    )
-
-    #ICE_COLUMN_NAME = "iceconc" #"Ice_Conc" # As per shapefiles_README.txt
-    ICE_COLUMN_NAME = "Ice_Conc"
-    
-    daily_ice_arrays = []
-    
-    # Regex to extract date (e.g., 20181201)
-    date_regex = re.compile(r"(\d{8})")
-
-    print("Rasterizing NIC shapefiles (this is a slow, one-time process)...")
-    for shp_file_path in tqdm(shp_files, desc="Processing Shapefiles"):
-        try:
-            date_match = date_regex.search(shp_file_path.name)
-            if not date_match:
-                print(f"Could not parse date from {shp_file_path.name}, skipping.")
-                continue
-            
-            file_date_str = date_match.group(1)
-            file_date = datetime.date(
-                int(file_date_str[0:4]), 
-                int(file_date_str[4:6]), 
-                int(file_date_str[6:8])
-            )
-            
-            gdf = gpd.read_file(shp_file_path)
-            
-            if ICE_COLUMN_NAME not in gdf.columns:
-                print(f"!!! '{ICE_COLUMN_NAME}' not in {shp_file_path.name}, skipping.")
-                continue
-            
-            if gdf.crs != master_grid.rio.crs:
-                gdf = gdf.to_crs(master_grid.rio.crs)
-                
-            shapes = [(geom, val) for geom, val in zip(gdf.geometry, gdf[ICE_COLUMN_NAME])]
-            
-            ice_mask_np = features.rasterize(
-                shapes=shapes,
-                out_shape=(height, width),
-                transform=transform,
-                fill=0,  # All non-polygon areas are 0 (water)
-                dtype=np.float32
-            )
-            
-            # Convert 0-100 scale to 0.0-1.0 scale
-            ice_mask_np = ice_mask_np / 100.0
-            
-            ice_da = xr.DataArray(
-                ice_mask_np,
-                coords={'y': master_grid['y'], 'x': master_grid['x']},
-                dims=['y', 'x'],
-            )
-            ice_da = ice_da.expand_dims(time=[pd.to_datetime(file_date)])
-            daily_ice_arrays.append(ice_da)
-            
-        except Exception as e:
-            print(f"Error processing {shp_file_path}: {e}")
-
-    if not daily_ice_arrays:
-        raise ValueError("Could not create NIC ice dataset.")
-        
-    full_ice_dataset = xr.concat(daily_ice_arrays, dim="time")
-    full_ice_dataset = full_ice_dataset.sortby("time")
-    full_ice_dataset.rio.write_crs(master_grid.rio.crs, inplace=True)
-
-    # --- ADD THIS CODE BLOCK HERE ---
-    print(f"Caching NIC ice data to: {config.TRAIN_NIC_CACHE_FILE}")
-    ds_to_save = full_ice_dataset.to_dataset(name='ice_conc')
-    config.TRAIN_NIC_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ds_to_save.to_netcdf(config.TRAIN_NIC_CACHE_FILE)
-    #full_ice_dataset.to_netcdf(config.TRAIN_NIC_CACHE_FILE)
-    
-    # print("Applying land mask (NaN) to NIC ice data...")
-    # land_mask = utilities.get_land_mask(master_grid)
-    # full_ice_dataset = full_ice_dataset.where(land_mask == 0) # Apply land mask (NaN)
-    
-    # *****************************************************************
-    # --- NEW DEBUG: Print stats of the final loaded ice data ---
-    # This will run once and show us if the target data is valid.
-    # *****************************************************************
-    print("--- DEBUG: Master NIC Ice Data Stats (T+1, T+2, T+3) ---")
-    print(f"  Shape: {full_ice_dataset.shape}")
-    if full_ice_dataset.shape[0] > 0:
-        print(f"  Min:   {full_ice_dataset.min().item():.4f}")
-        print(f"  Max:   {full_ice_dataset.max().item():.4f}")
-        print(f"  Mean:  {full_ice_dataset.mean().item():.4f}")
-        print(f"  NaNs:  {np.isnan(full_ice_dataset.values).sum()} (Land pixels)")
-    else:
-        print("  Data is empty!")
-    print("-----------------------------------------------------")
-    _nic_ice_data_cache = full_ice_dataset
-    print("NIC ice data cached.")
-    return _nic_ice_data_cache
-
-
-def get_nic_ice_data(valid_start_dates: List[datetime.date]) -> xr.DataArray:
-    """
-    Wrapper function to get the NIC ice data, using the cache if available.
-    """
-    global _nic_ice_data_cache
-    if _nic_ice_data_cache is None:
-        _nic_ice_data_cache = load_nic_ice_data_from_shapefiles()
-    
-    return _nic_ice_data_cache.copy()
 
 def load_glsea_ice_data() -> xr.DataArray:
     """
@@ -406,9 +250,8 @@ def load_glsea_ice_data() -> xr.DataArray:
     if config.TRAIN_GLSEA_ICE_CACHE_FILE.exists():
         print(f"Loading GLSEA ice data from disk cache: {config.TRAIN_GLSEA_ICE_CACHE_FILE}")
         try:
-            with xr.open_dataset(config.TRAIN_GLSEA_ICE_CACHE_FILE) as ds:
-                var_name = list(ds.data_vars.keys())[0]
-                _glsea_ice_data_cache = ds[var_name].load()
+            with xr.open_dataset(config.TRAIN_GLSEA_ICE_CACHE_FILE, engine="netcdf4") as ds:
+                _glsea_ice_data_cache = ds['glsea_ice_temp'].load()
                 print("GLSEA ice data load complete from disk cache.")
                 return _glsea_ice_data_cache
         except Exception as e:
@@ -418,7 +261,6 @@ def load_glsea_ice_data() -> xr.DataArray:
 
     all_glsea_ice_das = []
 
-    # --- THE REAL COORDINATES for the Great Lakes Grid ---
     # We are defining the grid's extent in Lat/Lon (EPSG:4326)
     # Based on the rotation, 'ny' (1024) is 'x' (Longitude)
     # and 'nx' (1024) is 'y' (Latitude)
@@ -430,7 +272,6 @@ def load_glsea_ice_data() -> xr.DataArray:
     # Latitude (y-axis)
     #lats = np.linspace(49.5, 41.0, N_Y)  # North to South (descending)
     lats = np.linspace(41.0, 49.5, N_Y)  # South to North (ascending)
-    # --- END COORDINATES ---
 
     for file_path in config.TRAIN_GLSEA_ICE_NC_FILES:
         if not file_path.exists():
@@ -441,12 +282,10 @@ def load_glsea_ice_data() -> xr.DataArray:
             with xr.open_dataset(file_path) as ds:
                 glsea_da = ds['temp'] # shape (time, nx, ny)
 
-                # --- FINAL ROTATION FIX ---
                 # 1. Rename dims: 'nx' -> 'y', 'ny' -> 'x'
                 #    This makes the dims ('time', 'y', 'x')
                 glsea_da = glsea_da.rename({'nx': 'y', 'ny': 'x'})
 
-                # --- ASSIGN REAL COORDINATES ---
                 # 2. Assign the Lat/Lon coordinates we defined
                 glsea_da = glsea_da.assign_coords({'x': lons, 'y': lats})
 
@@ -459,7 +298,7 @@ def load_glsea_ice_data() -> xr.DataArray:
 
         except Exception as e:
             print(f"Error processing GLSEA ice file {file_path}: {e}")
-            traceback.print_exc() # Add traceback for more info
+            traceback.print_exc()
 
     if not all_glsea_ice_das:
         raise ValueError("Could not create GLSEA ice dataset from provided files.")
@@ -473,7 +312,7 @@ def load_glsea_ice_data() -> xr.DataArray:
     print(f"Caching GLSEA ice data to: {config.TRAIN_GLSEA_ICE_CACHE_FILE}")
     ds_to_save = full_glsea_ice_dataset.to_dataset(name='glsea_ice_temp')
     config.TRAIN_GLSEA_ICE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ds_to_save.to_netcdf(config.TRAIN_GLSEA_ICE_CACHE_FILE)
+    ds_to_save.to_netcdf(config.TRAIN_GLSEA_ICE_CACHE_FILE, engine="h5netcdf")
 
     print("--- DEBUG: Master GLSEA Ice Data Stats ---")
     print(f"  Shape: {full_glsea_ice_dataset.shape}")
@@ -496,7 +335,7 @@ def get_glsea_ice_data() -> xr.DataArray:
         _glsea_ice_data_cache = load_glsea_ice_data()
     return _glsea_ice_data_cache.copy()
 
-def load_gebco_data() -> xr.DataArray:
+def load_gebco_data(master_grid: xr.DataArray) -> xr.DataArray:
     """
     Loads and processes GEBCO bathymetry data using bathyreq.
     """
@@ -537,7 +376,6 @@ def load_gebco_data() -> xr.DataArray:
         )
         da.rio.write_crs("EPSG:4326", inplace=True)
 
-        master_grid = utilities.get_master_grid_definition()
         print("Reprojecting GEBCO data to master grid...")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=FutureWarning)
@@ -555,11 +393,165 @@ def load_gebco_data() -> xr.DataArray:
         print(f"Error processing GEBCO data: {e}")
         raise e
 
-def get_gebco_data() -> xr.DataArray:
+def get_gebco_data(master_grid: xr.DataArray) -> xr.DataArray:
     """
     Wrapper function to get the GEBCO data, using the cache if available.
     """
     global _gebco_data_cache
     if _gebco_data_cache is None:
-        _gebco_data_cache = load_gebco_data()
+        _gebco_data_cache = load_gebco_data(master_grid)
     return _gebco_data_cache.copy()
+
+"""
+Test Data Loaders
+"""
+def load_test_ice_raw() -> xr.DataArray | None:
+    """
+    Loads the test set initial condition for ice concentration (RAW).
+    Converts 0-100 to 0-1 for consistency, but keeps land as NaN for now.
+    """
+    try:
+        with xr.open_dataset(config.TEST_ICE_NC, engine="netcdf4", decode_times=False) as ds:
+            data_da = ds['ice_cover'].load().squeeze() # Values 0-100, NaN for land
+
+            # --- 1. Rename dims to 'x' and 'y' ---
+            rename_dict = {}
+            if 'lon' in data_da.coords: rename_dict['lon'] = 'x'
+            if 'lat' in data_da.coords: rename_dict['lat'] = 'y'
+            data_da = data_da.rename(rename_dict)
+            
+            # --- 2. Steal coordinates from the master grid ---
+            print("...Assigning master grid coordinates to test ice data...")
+            master_grid = utilities.get_master_grid()
+            
+            # Flip data to match ascending 'y' coords
+            data_da.values = np.flipud(data_da.values)
+
+            data_da = data_da.assign_coords({
+                'x': master_grid.coords['x'],
+                'y': master_grid.coords['y']
+            })
+            
+            # --- 3. Set spatial dims & CRS ---
+            data_da = data_da.rio.set_spatial_dims(x_dim='x', y_dim='y')
+            data_da.rio.write_crs(config.MASTER_GRID_CRS, inplace=True)
+            
+            # --- 4. Process like in training ---
+            # Convert 0-100 to 0-1
+            data_da = data_da / 100.0
+            # Set land (NaN) to 0.0, as done in training
+            data_da_clean = data_da.fillna(0.0) 
+            
+            return data_da_clean
+
+    except Exception as e:
+        print(f"Error loading test ice concentration data: {e}")
+        return None
+
+def load_test_water_temp_raw() -> xr.DataArray | None:
+    """
+    Loads the test set initial condition for water temp (RAW).
+    """
+    try:
+        with xr.open_dataset(config.TEST_GLSEA_NC, engine="netcdf4", decode_times=False) as ds:
+            data_da = ds['sst'].load().squeeze() # Values in C, NaN for land/ice
+
+            # --- 1. Rename dims to 'x' and 'y' ---
+            rename_dict = {}
+            if 'lon' in data_da.coords: rename_dict['lon'] = 'x'
+            if 'lat' in data_da.coords: rename_dict['lat'] = 'y'
+            data_da = data_da.rename(rename_dict)
+
+            # --- 2. Steal coordinates from the master grid ---
+            print("...Assigning master grid coordinates to test water temp data...")
+            master_grid = utilities.get_master_grid()
+            
+            # Flip data to match ascending 'y' coords
+            data_da.values = np.flipud(data_da.values)
+
+            data_da = data_da.assign_coords({
+                'x': master_grid.coords['x'],
+                'y': master_grid.coords['y']
+            })
+            
+            # --- 3. Set spatial dims & CRS ---
+            data_da = data_da.rio.set_spatial_dims(x_dim='x', y_dim='y')
+            data_da.rio.write_crs(config.MASTER_GRID_CRS, inplace=True)
+
+            # --- 4. Process like in training ---
+            # Set land/ice (NaN) to 0.0
+            data_da_clean = data_da.fillna(0.0)
+            
+            return data_da_clean
+
+    except Exception as e:
+        print(f"Error loading test water temp data: {e}")
+        return None
+
+def load_test_hrrr_forecast_raw() -> xr.Dataset | None:
+    """
+    Loads the full 4-day (96hr) HRRR forecast (RAW).
+    This dataset MUST be reprojected before use.
+    """
+    try:
+        with xr.open_dataset(config.TEST_HRRR_NC, engine="netcdf4", decode_times=False) as ds:
+            ds_load = ds.load()
+
+            rename_dict = {}
+            if 'lon' in ds_load.coords: rename_dict['lon'] = 'x'
+            if 'lat' in ds_load.coords: rename_dict['lat'] = 'y'
+            ds_load = ds_load.rename(rename_dict)
+            
+            # --- 0-360 longitude ---
+            if 'x' in ds_load.coords and ds_load['x'].max() > 180:
+                print("...Converting HRRR longitude from 0-360 to -180-180...")
+                ds_load.coords['x'] = (((ds_load.coords['x'] + 180) % 360) - 180)
+                ds_load = ds_load.sortby('x')
+
+            ds_load = ds_load.rio.set_spatial_dims(x_dim='x', y_dim='y')
+            
+            if ds_load.rio.crs is None:
+                ds_load.rio.write_crs(config.MASTER_GRID_CRS, inplace=True)
+                
+            return ds_load
+
+    except Exception as e:
+        print(f"Error loading test HRRR data: {e}")
+        return None
+
+def load_test_initial_conditions(master_grid: xr.DataArray):
+    """
+    Loads and returns the initial conditions for the test forecast.
+    """
+    ice_raw = load_test_ice_raw()
+    water_temp_raw = load_test_water_temp_raw()
+
+    # ice_class is not provided, so we derive it from ice concentration
+    # This is a simple assumption, but it's better than nothing.
+    ice_class = (ice_raw > 0.15).astype(np.float32)
+
+    return ice_raw.values, water_temp_raw.values, ice_class.values
+
+def load_test_ground_truth(dates: list) -> dict:
+    """
+    Loads the ground truth ice concentration for the given dates.
+    """
+    import data_loaders
+    import pandas as pd
+
+    master_ice_and_temp_data = data_loaders.get_glsea_ice_data()
+    ground_truth_data = {}
+
+    for date in dates:
+        date_pd = pd.to_datetime(date)
+        da = master_ice_and_temp_data.sel(time=date_pd, method="nearest")
+        time_diff = abs((da.time.values - date_pd.to_numpy()) / np.timedelta64(1, 'h'))
+
+        if time_diff <= 12:
+            da_squeezed = da.squeeze()
+            ice_conc = xr.where(da_squeezed < 0, -da_squeezed, 0.0)
+            ground_truth_data[date] = ice_conc
+        else:
+            ground_truth_data[date] = None
+
+    return ground_truth_data
