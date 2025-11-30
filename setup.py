@@ -150,6 +150,8 @@ def download_public_data():
     **Skips any files or processed data that are already present.**
     """
     print_step("STEP 4: DOWNLOADING PUBLIC DATA")
+
+    print_warning(f"If you're on a Linux and any of the below downloads hang, try: {bcolors.OKCYAN}sudo sysctl -w net.ipv4.tcp_mtu_probing=1{bcolors.ENDC}")
     
     # 1. Download GLSEA Data
     print_info("--- Checking GLSEA Data ---")
@@ -271,4 +273,5 @@ def main():
     print(f"{bcolors.HEADER}====================================================={bcolors.ENDC}")
 
 if __name__ == "__main__":
+
     main()
