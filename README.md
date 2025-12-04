@@ -4,28 +4,27 @@ A deep learning pipeline for 3-day Great Lakes ice concentration forecasting. Th
 
 ## **Repository Structure**
 
-* **model.py**: Custom 2D U-Net architecture with 9 input channels.  
-* **train.py**: Training loop with mixed-precision (amp) and masked loss (ignores land pixels).  
-* **dataset.py**: PyTorch Dataset implementation with caching, normalization, and biased sampling (prioritizing ice/shipping lanes).  
-* **data\_loaders.py**: Geospatial data handling (xarray/rioxarray) for GLSEA, HRRR, and GEBCO.  
-* **utilities.py**: Helper functions for master grid definition, land masking, and shipping route rasterization.  
-* **visualize\_forecast\_submission.py**: The main inference engine. Generates the submission NetCDF, dashboard images, and auto-generated narrative.  
-* **visualize\_forecast\_debug.py**: Tool for debugging individual model predictions and layers.  
-* **config.py**: Central configuration for file paths, grid CRS (EPSG:4326), and model hyperparameters.  
-* **setup.py**: Automated script to download public datasets and configure directory structure.
+*   **model.py**: Custom 2D U-Net architecture with 12 input channels.  
+*   **train.py**: Training loop with mixed-precision (amp) and masked loss (ignores land pixels).  
+*   **dataset.py**: PyTorch Dataset implementation with caching, normalization, and biased sampling (prioritizing ice/shipping lanes).  
+*   **data\_loaders.py**: Geospatial data handling (xarray/rioxarray) for GLSEA, HRRR, and GEBCO.  
+*   **utilities.py**: Helper functions for master grid definition, land masking, and shipping route rasterization.  
+*   **evaluate.py**: Main script for evaluation, inference, and generating the submission forecast.
+*   **config.py**: Central configuration for file paths, grid CRS (EPSG:4326), and model hyperparameters.  
+*   **setup.py**: Automated script to download public datasets and configure directory structure.
 
 ## **Setup**
 
-1. Environment  
-   Create the conda environment:  
-   conda env create \-f environment.yml  
-   conda activate glic\_env
+1.  Environment  
+    Create the conda environment:  
+    conda env create \-f environment.yml  
+    conda activate glic\_env
 
-2. Data Initialization  
-   Run the setup script to create directories and download public data (GLSEA, Shipping Routes):  
-   python setup.py
+2.  Data Initialization  
+    Run the setup script to create directories and download public data (GLSEA, Shipping Routes):  
+    python setup.py
 
-   *Note: You must manually place the contest "Test Data" into the datasets/ folder as prompted by the script.*
+    *Note: You must manually place the contest "Test Data" into the datasets/ folder as prompted by the script.*
 
 ## **Usage**
 
@@ -39,13 +38,13 @@ python train.py
 
 Run the full inference pipeline using the **Test Data**. This script:
 
-* Loads the specific test files (T0 Initial Conditions \+ Weather).  
-* Runs the model for T+1, T+2, and T+3.  
-* Generates the CF-Compliant NetCDF (forecasts/submission\_forecast.nc).  
-* Performs auto-analysis on 30+ strategic regions to generate the narrative.  
-* Outputs map visualizations.
+*   Loads the specific test files (T0 Initial Conditions \+ Weather).  
+*   Runs the model for T+1, T+2, and T+3.  
+*   Generates the CF-Compliant NetCDF (forecasts/submission\_forecast.nc).  
+*   Performs auto-analysis on 30+ strategic regions to generate the narrative.  
+*   Outputs map visualizations.
 
-python visualize\_forecast\_submission.py
+python evaluate.py --mode submission
 
 ### **3\. View Dashboard**
 
@@ -53,10 +52,10 @@ Open docs/index.html in any web browser to view the interactive, data-driven Com
 
 ## **Methodology**
 
-* **Input:** 9-Channel Tensor (Ice T0, Ice Delta, HRRR \[Temp, Wind U/V, Precip\], Water Temp, Bathymetry, Shipping Mask).  
-* **Architecture:** 2D U-Net with 64 filters, GroupNorm, and residual connections.  
-* **Loss:** Masked MSE (calculated only on water pixels).  
-* **Analysis:** The system dynamically scans pixel arrays for specific ROIs (Whitefish Bay, Mackinac, etc.) to trigger operational warnings in the narrative.
+*   **Input:** 12-Channel Tensor (Ice T0, Ice Delta, HRRR [Temp, Wind U/V, Precip], Water Temp, Bathymetry, Shipping Mask, CFDD, Floe Size, Edge Mask).  
+*   **Architecture:** 2D U-Net with 64 filters, GroupNorm, and residual connections.  
+*   **Loss:** Masked MSE (calculated only on water pixels).  
+*   **Analysis:** The system dynamically scans pixel arrays for specific ROIs (Whitefish Bay, Mackinac, etc.) to trigger operational warnings in the narrative.
 
 ## **License**
 

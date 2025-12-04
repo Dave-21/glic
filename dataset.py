@@ -1,551 +1,571 @@
-import torch
-from torch.utils.data import Dataset, DataLoader
-import numpy as np
 import datetime
-from pathlib import Path
-from typing import List, Dict, Tuple
-import xarray as xr
-import random
-from rasterio.enums import Resampling
-import pandas as pd
-import re 
-import geopandas as gpd 
-from rasterio import features 
-from rasterio.transform import from_bounds
-from concurrent.futures import ThreadPoolExecutor
 import json
+from typing import Dict, List
+from collections import defaultdict
+
+import numpy as np
+import pandas as pd
+import torch
+import xarray as xr
+from torch.utils.data import Dataset, Sampler
 from tqdm import tqdm
+from functools import lru_cache
+import logging
+import matplotlib.pyplot as plt
+
 import config
-from config import HRRR_VARS
 import data_loaders
 import utilities
-from data_loaders import get_glsea_ice_data, get_gebco_data
+from config import HRRR_VARS
 
 # --- Dataset Constants ---
-PATCH_SIZE = 256
+PATCH_SIZE = 256  # The data is pre-processed into grids, but we still sample patches
+N_INPUT_STATE_CHANNELS = 2
+N_WEATHER_CHANNELS = len(HRRR_VARS)
+N_GLSEA_CHANNELS = 1
+N_STATIC_CHANNELS = 2
+N_CFDD_CHANNELS = 1
+N_FLOE_CHANNELS = 1
+N_EDGE_CHANNELS = 1
+N_INPUT_CHANNELS = (
+    N_INPUT_STATE_CHANNELS + N_WEATHER_CHANNELS + N_GLSEA_CHANNELS + N_STATIC_CHANNELS + N_CFDD_CHANNELS + N_FLOE_CHANNELS + N_EDGE_CHANNELS
+)
+N_OUTPUT_CHANNELS = 3  # Predict all 3 days for both conc & thick
+N_TIMESTEPS = 3
 
-# --- Channel Definitions ---
-N_INPUT_STATE_CHANNELS = 2    # (Ice_T0, DeltaIce)
-N_WEATHER_CHANNELS = len(HRRR_VARS)     # 4 channels
-N_GLSEA_CHANNELS = 1          # (Water Temp ONLY)
-N_STATIC_CHANNELS = 2         # 1 channel (shipping routes), 1 channel (GEBCO)
-N_INPUT_CHANNELS = N_INPUT_STATE_CHANNELS + N_WEATHER_CHANNELS + N_GLSEA_CHANNELS + N_STATIC_CHANNELS # 9 channels
-N_OUTPUT_CHANNELS = 3
-N_TIMESTEPS = 3               # We predict T+1, T+2, T+3
-
-# --- Sampler Bias ---
-BIAS_ICE_PIXELS = True
-BIAS_SHIPPING_ROUTES = True
-ICE_THRESHOLD_FOR_BIAS = 0.001
 
 class GreatLakesDataset(Dataset):
     def __init__(self, is_train=True, weather_stats: Dict = None):
+        if config.DEBUG_MODE:
+            print(f"DEBUG: Initializing GreatLakesDataset with is_train={is_train}, weather_stats provided: {weather_stats is not None}")
         self.is_train = is_train
         self.patch_size = PATCH_SIZE
-        
+        self.master_grid = utilities.get_master_grid()
+
         self.start_date = config.START_DATE
         self.end_date = config.END_DATE
-        self.all_dates_in_range = [self.start_date + datetime.timedelta(days=x) for x in range((self.end_date - self.start_date).days + 1)]
-        
+
         print("Loading master dataset (is_train={})...".format(self.is_train))
-        
-        # 1. Load Data (order matters)
-        self.master_ice_and_temp_data = data_loaders.get_glsea_ice_data()
-        master_grid_2d = self.master_ice_and_temp_data.isel(time=0).squeeze()
 
-        print("  > Setting master grid CRS from config.MASTER_GRID_CRS...")
-        master_grid_2d.rio.write_crs(config.MASTER_GRID_CRS, inplace=True)
+        self.land_mask = utilities.get_land_mask(self.master_grid)
+        self.shipping_routes_mask = utilities.get_shipping_route_mask(self.master_grid)
+        self.gebco_data = data_loaders.get_gebco_data(self.master_grid)
+
+        print("Opening GLSEA and HRRR data for lazy loading...")
+        self.glsea_data = data_loaders.load_glsea_ice_data()
+        self.hrrr_data = data_loaders.get_consolidated_hrrr_dataset()
         
-        self.gebco_data = data_loaders.get_gebco_data(master_grid_2d) # Still needed for a static channel
-        print(f"gebco_data shape: {self.gebco_data.sizes}")
-        print(f"master_ice_and_temp_data shape: {self.master_ice_and_temp_data.sizes}")
-        
-        self.land_mask = utilities.get_land_mask(master_grid_2d)
-        self.shipping_routes_mask = utilities.get_shipping_route_mask(master_grid_2d)
-        
-        # 2. Find valid data ranges
+        print("Loading CFDD data...")
+        if config.TRAIN_CFDD_NC_FILE.exists():
+            self.cfdd_data = xr.open_dataset(config.TRAIN_CFDD_NC_FILE)["cfdd"]
+            # self.cfdd_data.load() # Keep lazy if large, but it's 1024x1024x150 floats ~ 600MB. 
+            # Loading into RAM is faster for training.
+            print("Loading CFDD into memory for speed...")
+            self.cfdd_data.load()
+        else:
+            print("!!! WARNING: CFDD file not found. Run precompute_cfdd.py.")
+            self.cfdd_data = None
+            
+        print("GLSEA, HRRR, and CFDD data ready.")
+
         self.valid_start_dates = self.find_valid_start_dates()
-        
         if not self.valid_start_dates:
-            raise ValueError("No valid start dates found in the specified range.")
-        
-        # 3. Handle weather stats AND PRE-LOAD HRRR DATA
-        self.weather_stats = weather_stats
-        self.hrrr_data_cache = {} # This will hold all 91 days of data
-        stats_path = config.PROJECT_ROOT / "weather_stats.json"
+            raise ValueError("No valid start dates found. Run preprocess_nic_data.py.")
 
-        if is_train:
-            if stats_path.exists():
-                # 1. Stats file exists, just load it
-                print(f"Loading weather stats from cache: {stats_path}")
-                with open(stats_path, 'r') as f:
-                    self.weather_stats = json.load(f)
-                
-                # 2. Still need to pre-load data, but *without* calculating stats
-                print("Pre-loading HRRR data for training...")
-                all_weather_data, _ = self.get_weather_stats(master_grid_2d, calculate_stats=False)
-            
-            else:
-                # 3. Stats file NOT found. Do the full calculation.
-                print("Weather stats cache not found.")
-                print("Calculating weather stats and pre-loading HRRR data...")
-                all_weather_data, stats = self.get_weather_stats(master_grid_2d, calculate_stats=True)
-                self.weather_stats = stats
-                
-                # 4. Save stats to disk for next time
-                try:
-                    with open(stats_path, 'w') as f:
-                        json.dump(self.weather_stats, f, indent=4)
-                    print(f"Saving weather stats to {stats_path}...")
-                except Exception as e:
-                    print(f"!!! Warning: Could not save weather stats: {e}")
-            
-        elif self.weather_stats is None:
-             raise ValueError("Validation dataset requires weather_stats to be provided (from training set).")
+        self.weather_stats = self._get_or_calculate_weather_stats(weather_stats)
 
-        else: # This is the validation set
-            print("Validation dataset: Using provided weather stats.")
-            # We must *still* load the data for the validation set
-            print("Pre-loading HRRR data for validation...")
-            all_weather_data, _ = self.get_weather_stats(master_grid_2d, calculate_stats=False)
-        
-        # --- Common pre-loading logic for all cases ---
-        for ds in all_weather_data:
-            date_key = str(pd.to_datetime(ds['time'].values).date())
-            self.hrrr_data_cache[date_key] = ds
-        print(f"HRRR data pre-loaded into memory cache ({len(self.hrrr_data_cache)} days).")
+        # The "patches" are now just sampling coordinates on the full grid
+        self.patches = self.generate_sampling_patches()
+        if not self.patches:
+            raise ValueError("No valid patches with ice or shipping routes found.")
 
-            
-        # 4. Find valid patches
-        cache_filename = f"valid_patches_{'train' if is_train else 'val'}_{self.start_date.strftime('%Y%m%d')}_{self.end_date.strftime('%Y%m%d')}.json"
-        cache_path = config.PROJECT_ROOT / cache_filename
-        
-        try:
-            if cache_path.exists():
-                print(f"Loading valid patches from cache: {cache_path}")
-                with open(cache_path, 'r') as f:
-                    patches_json = json.load(f)
-                self.valid_patches = [{'date': datetime.datetime.strptime(p['date'], '%Y-%m-%d').date(), 'h': p['h'], 'w': p['w']} for p in patches_json]
-            else:
-                print("Cache not found.")
-                self.valid_patches = self.find_valid_patches()
-                print(f"Saving valid patches to cache: {cache_path}")
-                patches_json = [{'date': p['date'].strftime('%Y-%m-%d'), 'h': p['h'], 'w': p['w']} for p in self.valid_patches]
-                with open(cache_path, 'w') as f:
-                    json.dump(patches_json, f)
-        except Exception as e:
-            print(f"!!! Warning: Could not use patch cache. Re-generating. Error: {e}")
-            self.valid_patches = self.find_valid_patches()
-        
-        if not self.valid_patches:
-            raise ValueError("No valid patches found for training/validation.")
-        
-        if is_train:
-            print("Saving master sample list to 'master_sample_log.csv'...")
-            try:
-                patches_df = pd.DataFrame(self.valid_patches)
-                patches_df['date'] = patches_df['date'].apply(lambda x: x.strftime('%Y-%m-%d'))
-                log_path = config.PROJECT_ROOT / "master_sample_log.csv"
-                patches_df.to_csv(log_path, index=False)
-                print(f"Master sample log saved to {log_path}")
-            except Exception as e:
-                print(f"!!! Warning: Could not save master sample log: {e}")
-                
-        print(f"Loaded dataset: {len(self.valid_patches)} total samples, is_train={is_train}")
+        print(f"Loaded dataset: {len(self.patches)} total samples, is_train={is_train}")
 
     def __len__(self):
-        return len(self.valid_patches)
+        return len(self.patches)
 
     def find_valid_start_dates(self) -> List[datetime.date]:
-        """
-        Finds all dates (T0) in the range that have data for:
-        T-1 (Weather), T0 (Ice), and T+3 (Ice).
-        """
+        """Finds all dates (T0) that have all required pre-processed data."""
         valid_dates = []
-        print(f"Filtering valid start dates from {self.start_date} to {self.end_date}...")
-        
-        # print(f"Total available dates in NIC data: {len(nic_data['time'])}")
-        print(f"Total available dates in GLSEA (master) data: {len(self.master_ice_and_temp_data['time'])}")
-        
-        for t0 in self.all_dates_in_range:
-            t_minus_1 = t0 - datetime.timedelta(days=1)
-            t1 = t0 + datetime.timedelta(days=1)
-            t2 = t0 + datetime.timedelta(days=2)
-            t3 = t0 + datetime.timedelta(days=3)
-            
-            # We need ice data for T-1, T0, T+1, T+2, T+3
-            # We need weather data for T-1
-            
-            # Check for ice data (T-1 to T+3)
-            has_t_minus_1 = self.check_ice_data_exists(t_minus_1)
-            has_t0 = self.check_ice_data_exists(t0)
-            has_t1 = self.check_ice_data_exists(t1)
-            has_t2 = self.check_ice_data_exists(t2)
-            has_t3 = self.check_ice_data_exists(t3)
+        all_possible_dates = [
+            self.start_date + datetime.timedelta(days=x)
+            for x in range((self.end_date - self.start_date).days + 1)
+        ]
 
-            if has_t_minus_1 and has_t0 and has_t1 and has_t2 and has_t3:
+        print("Filtering valid start dates based on pre-processed NIC data...")
+        for t0 in all_possible_dates:
+            required_dates = [
+                t0 + datetime.timedelta(days=i) for i in range(-1, N_TIMESTEPS + 1)
+            ]
+            if all(self.check_nic_data_exists(d) for d in required_dates):
                 valid_dates.append(t0)
-        
-        print(f"Total valid START dates (T-1 to T+3): {len(valid_dates)}")
+
+        print(f"Found {len(valid_dates)} valid start dates.")
         return valid_dates
 
-    def check_ice_data_exists(self, target_date: datetime.date) -> bool:
-        """Checks if GLSEA ice data exists within 12 hours of the target date."""
-        try:
-            date_pd = pd.to_datetime(target_date)
-            da = self.master_ice_and_temp_data.sel(time=date_pd, method="nearest")
-            time_diff = abs((da.time.values - date_pd.to_numpy()) / np.timedelta64(1, 'h'))
-            return time_diff <= 12
-        except:
-            return False
+    def check_nic_data_exists(self, target_date: datetime.date) -> bool:
+        """Checks if a pre-processed NIC NetCDF file exists for the given date."""
+        return (
+            config.NIC_PROCESSED_DIR / f"NIC_{target_date.strftime('%Y-%m-%d')}.nc"
+        ).exists()
 
-    def get_weather_stats(self, master_grid: xr.DataArray, calculate_stats=True) -> Tuple[List[xr.Dataset], Dict]:
-        """
-        Loads all HRRR data and optionally calculates mean/std.
-        Returns the loaded data AND the stats.
-        """
-        stats = {var: {'all_values': []} for var in HRRR_VARS}
-        all_data = []
-        
-        # Get T-1 dates
-        days_to_load = sorted(list(set(date - datetime.timedelta(days=1) for date in self.valid_start_dates)))
-        
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_date = {executor.submit(data_loaders.load_hrrr_data_for_day, date, master_grid): date for date in days_to_load}
-            
-            for future in tqdm(future_to_date, desc="Gathering weather stats"):
-                try:
-                    weather_data = future.result()
-                    if weather_data is not None:
-                        all_data.append(weather_data)
-                        
-                        if calculate_stats:
-                            for var_name in HRRR_VARS:
-                                var_data = weather_data[var_name].values
-                                stats[var_name]['all_values'].append(var_data[np.isfinite(var_data)])
-                except Exception as e:
-                    date_for_future = future_to_date[future]
-                    print(f"!! Warning: Thread failed for date {date_for_future}: {e}")
+    def _get_or_calculate_weather_stats(self, provided_stats):
+        stats_path = config.PROJECT_ROOT / "weather_stats.json"
+        if provided_stats:
+            print("Using provided weather stats.")
+            return provided_stats
+        if stats_path.exists():
+            print(f"Loading weather stats from cache: {stats_path}")
+            with open(stats_path, "r") as f:
+                return json.load(f)
 
-        if not calculate_stats:
-            return all_data, None # Just return the loaded data
-
-        # --- Stats calculation logic ---
+        print("Calculating weather stats from pre-loaded HRRR data...")
         final_stats = {}
-        total_failure = False
-        print("\n--- Calculating Final Weather Stats ---")
-        for var_name, data in stats.items():
-            if not data['all_values']:
-                print(f"!!! FATAL ERROR: No HRRR data was successfully loaded for '{var_name}'.")
-                final_stats[var_name] = {'mean': 0.0, 'std': 1.0}
-                total_failure = True
-            else:
-                all_v = np.concatenate(data['all_values'])
-                if all_v.size == 0:
-                    print(f"!!! FATAL ERROR: Concatenated array for '{var_name}' is empty (all NaNs?).")
-                    final_stats[var_name] = {'mean': 0.0, 'std': 1.0}
-                    total_failure = True
-                else:
-                    final_stats[var_name] = {
-                        'mean': float(np.mean(all_v)),
-                        'std': float(np.std(all_v))
-                    }
-                    print(f"  {var_name}: Mean={final_stats[var_name]['mean']:.2f}, Std={final_stats[var_name]['std']:.2f}")
+        for var_name in HRRR_VARS:
+            all_values = self.hrrr_data[var_name].values
+            final_stats[var_name] = {
+                "mean": float(np.nanmean(all_values)),
+                "std": float(np.nanstd(all_values)),
+            }
+            if (
+                np.isnan(final_stats[var_name]["std"])
+                or final_stats[var_name]["std"] == 0
+            ):
+                raise ValueError(
+                    f"Stat calculation for '{var_name}' resulted in std=0 or NaN."
+                )
 
-        if total_failure:
-            raise ValueError("Failed to calculate all weather stats. Stopping training.")
-            
-        return all_data, final_stats
+        if self.is_train:
+            with open(stats_path, "w") as f:
+                json.dump(final_stats, f, indent=4)
+            print(f"Saved weather stats to {stats_path}")
+        return final_stats
 
-    def find_valid_patches(self) -> List[Dict]:
-        """
-        Finds all valid (h, w) corners for patch sampling.
-        A patch is valid if it is not 100% land.
-        If biasing, it must also contain ice OR be on a shipping route.
-        """
+    def generate_sampling_patches(self) -> List[Dict]:
+        """Generates a list of valid (date, h, w) coords for patch sampling."""
         H, W = self.patch_size, self.patch_size
         grid_h, grid_w = self.land_mask.shape
-        
-        # 1. Get the masks as numpy arrays
-        land_mask_np = self.land_mask.values
-        shipping_routes_np = self.shipping_routes_mask.values
-        
-        valid_patches = []
-        
-        for date_t0 in tqdm(self.valid_start_dates, desc="Finding valid patches"):
-            # Get T0 ice data
-            ice_data_t0 = self.get_ice_conc_for_day(date_t0)
-            if ice_data_t0 is None:
+        patches = []
+        for date_t0 in tqdm(
+            self.valid_start_dates, desc="Finding valid sampling patches"
+        ):
+            ds = self.get_ice_data_for_day(date_t0)
+            if ds is None:
                 continue
 
-            # Iterate over the grid with patch_size steps
-            for h in range(0, grid_h - H + 1, H):
-                for w in range(0, grid_w - W + 1, W):
-                        
-                    # 2. Check for 100% land
-                    land_mask_patch = land_mask_np[h:h+H, w:w+W]
-                    if np.all(land_mask_patch == 1):
-                        continue # Skip 100% land patches
-                    
-                    # Check for ice
-                    has_ice = False
-                    if BIAS_ICE_PIXELS:
-                        ice_patch_t0_nan = ice_data_t0.values[h:h+H, w:w+W]
-                        ice_patch_t0 = np.nan_to_num(ice_patch_t0_nan, nan=0.0)
-                        if np.any(ice_patch_t0 > ICE_THRESHOLD_FOR_BIAS):
-                            has_ice = True
-                    
-                    # Check for shipping route
-                    on_shipping_route = False
-                    if BIAS_SHIPPING_ROUTES:
-                        shipping_patch = shipping_routes_np[h:h+H, w:w+W]
-                        if np.any(shipping_patch == 1):
-                            on_shipping_route = True
+            ice_conc_t0 = ds["ice_concentration"].values
+            for h in range(0, grid_h - H, 96):  # Stride for efficiency
+                for w in range(0, grid_w - W, 96):
+                    if np.all(self.land_mask.values[h: h + H, w: w + W]):
+                        continue
 
-                    # If we are not biasing at all, add any non-land patch
-                    if not BIAS_ICE_PIXELS and not BIAS_SHIPPING_ROUTES:
-                        valid_patches.append({'date': date_t0, 'h': h, 'w': w})
-                    
-                    # If we are biasing, at least one of our biases must be met
-                    elif (BIAS_ICE_PIXELS and has_ice) or (BIAS_SHIPPING_ROUTES and on_shipping_route):
-                        valid_patches.append({'date': date_t0, 'h': h, 'w': w, 'is_shipping': on_shipping_route})
+                    has_ice = np.any(ice_conc_t0[h: h + H, w: w + W] > 0.01)
+                    on_shipping_route = np.any(
+                        self.shipping_routes_mask.values[h: h + H, w: w + W]
+                    )
+                    if has_ice or on_shipping_route:
+                        patches.append({"date": date_t0, "h": h, "w": w})
+        if config.DEBUG_MODE:
+            print(f"DEBUG: Generated {len(patches)} sampling patches.")
+        return patches
 
-        # After the loop, check if we found anything
-        if not valid_patches:
-            # This is the new error you are seeing
-            raise ValueError("No valid patches found for training/validation.")
-            
-        return valid_patches
-
-    def get_ice_conc_for_day(self, target_date: datetime.date) -> xr.DataArray | None:
-        """
-        Safely gets the nearest GLSEA data for a target date and extracts
-        ONLY the ice concentration.
-        """
-        try:
-            date_pd = pd.to_datetime(target_date)
-            da = self.master_ice_and_temp_data.sel(time=date_pd, method="nearest")
-            time_diff = abs((da.time.values - date_pd.to_numpy()) / np.timedelta64(1, 'h'))
-            
-            if time_diff <= 12:
-                da_squeezed = da.squeeze()
-                # ISOLATE ICE: In GLSEA, ice is < 0. Convert to 0-1 fraction.
-                ice_conc = xr.where(da_squeezed < 0, -da_squeezed, 0.0)
-                return ice_conc
-            else:
-                return None
-        except Exception as e:
-            #print(f"Error getting ice data for {target_date}: {e}")
+    @lru_cache(maxsize=32)  # Cache up to 32 NIC files per process (Optimized for 16GB RAM)
+    def _cached_get_ice_data_for_day(self, target_date_str: str) -> xr.Dataset | None:
+        """Loads a pre-processed NIC NetCDF file for a given date from disk."""
+        # target_date = datetime.datetime.strptime(target_date_str, "%Y-%m-%d").date() # Not used
+        fpath = config.NIC_PROCESSED_DIR / f"NIC_{target_date_str}.nc"
+        if not fpath.exists():
+            print(f"Warning: NIC file not found for date {target_date_str}, returning None.")
             return None
 
-    def get_water_temp_for_day(self, target_date: datetime.date, h: int, w: int) -> torch.Tensor | None:
-        """
-        Safely gets the nearest GLSEA data for a target date and extracts
-        ONLY the water temperature.
-        Returns a (water_temp_tensor) or (None) if data is not found.
-        """
-        H, W = self.patch_size, self.patch_size
+        with xr.open_dataset(fpath) as ds:
+            return ds.load()
+
+    def get_ice_data_for_day(self, target_date: datetime.date) -> xr.Dataset | None:
+        """Loads a pre-processed NIC NetCDF file for a given date, using a cache."""
+        return self._cached_get_ice_data_for_day(target_date.strftime("%Y-%m-%d"))
+
+    def get_water_temp_for_day(self, target_date: datetime.date) -> xr.DataArray | None:
         try:
-            date_pd = pd.to_datetime(target_date)
-            da = self.master_ice_and_temp_data.sel(time=date_pd, method="nearest")
-            time_diff = abs((da.time.values - date_pd.to_numpy()) / np.timedelta64(1, 'h'))
-            
-            if time_diff <= 12:
-                patch_data = da.squeeze().values[h:h+H, w:w+W]
-                patch_data = np.nan_to_num(patch_data, nan=0.0) # Fill NaNs with 0
-                
-                # Split into water temperature and ice concentration
-                water_temp = np.where(patch_data > 0, patch_data, 0.0)
-                
-                return torch.from_numpy(water_temp).float().unsqueeze(0)
-            else:
-                return None
-        except Exception as e:
-            #print(f"Error getting GLSEA data for {target_date}: {e}")
+            return self.glsea_data.sel(
+                time=str(target_date),
+                method="nearest",
+                tolerance=pd.Timedelta(hours=12),
+            )
+        except (KeyError, AttributeError):
             return None
-
-    def build_input_tensor(self, target_date, h, w, fill_val=0.0) -> torch.Tensor:
-        """
-        Helper to build a single [1, H, W] ice tensor for a given date and patch.
-        """
-        H, W = self.patch_size, self.patch_size
-        da = self.get_ice_conc_for_day(target_date)
-        
-        if da is None:
-            # This can happen for T-1, fill with zeros
-            patch = np.full((H, W), fill_val)
-        else:
-            patch = da.values[h:h+H, w:w+W]
-            # Set land (NaN) to the fill_val (0.0)
-            patch = np.nan_to_num(patch, nan=fill_val)
-            
-        return torch.from_numpy(patch).float().unsqueeze(0) # [1, H, W]
-
-    def build_output_tensor(self, target_date, h, w) -> torch.Tensor:
-        """
-        Helper to build a single [H, W] target tensor.
-        """
-        H, W = self.patch_size, self.patch_size
-        da = self.get_ice_conc_for_day(target_date)
-        
-        if da is None:
-            print(f"!!! WARNING: No T+1/T+2/T+3 data found for {target_date}, returning zeros.")
-            return torch.zeros((H, W))
-            
-        patch = da.values[h:h+H, w:w+W]
-        # Set land (NaN) to 0.0. The loss mask will handle this.
-        patch = np.nan_to_num(patch, nan=0.0)
-        
-        return torch.from_numpy(patch).float() # [H, W]
 
     def __getitem__(self, idx):
-        # We only apply this bias during training.
-        # We aim for 50% of batches to be focused on shipping routes.
-        if self.is_train and random.random() < 0.50:
-            # Find all indices that are flagged as being on a shipping route.
-            # We use .get('is_shipping', False) to be safe if the flag is missing.
-            shipping_indices = [
-                i for i, p in enumerate(self.valid_patches) 
-                if p.get('is_shipping', False)
-            ]
-            
-            if shipping_indices:
-                # Pick a random shipping route patch instead of the requested idx
-                idx = random.choice(shipping_indices)
-                
         H, W = self.patch_size, self.patch_size
-        sample_info = self.valid_patches[idx]
-        day_t0 = sample_info['date']
-        h, w = sample_info['h'], sample_info['w']
-        
-        # --- 1. Build Input Tensor (x) ---
-        day_t_minus_1 = day_t0 - datetime.timedelta(days=1)
-        
-        x_ice_t0 = self.build_input_tensor(day_t0, h, w, fill_val=0.0)
-        x_ice_t_minus_1 = self.build_input_tensor(day_t_minus_1, h, w, fill_val=0.0)
-        x_ice_delta = x_ice_t0 - x_ice_t_minus_1 # [1, H, W]
-        
-        static_patch = self.shipping_routes_mask.values[h:h+H, w:w+W]
-        x_static_tensor = torch.from_numpy(static_patch).float().unsqueeze(0) # [1, H, W]
+        sample_info = self.patches[idx]
+        day_t0 = sample_info["date"]
+        h, w = sample_info["h"], sample_info["w"]
 
-        x_water_temp = self.get_water_temp_for_day(day_t0, h, w)
-        if x_water_temp is None:
-            # print(f"!!! WARNING: Missing GLSEA data for {day_t0}, using zeros.")
+        # --- 1. Build Input Tensors ---
+        day_t_minus_1 = day_t0 - datetime.timedelta(days=1)
+
+        ds_t0 = self.get_ice_data_for_day(day_t0)
+        ds_t_minus_1 = self.get_ice_data_for_day(day_t_minus_1)
+
+        x_ice_t0 = (
+            torch.from_numpy(ds_t0["ice_concentration"].values[h: h + H, w: w + W])
+            .float()
+            .unsqueeze(0)
+        )
+        x_ice_t_minus_1 = (
+            torch.from_numpy(ds_t_minus_1["ice_concentration"].values[h: h + H, w: w + W])
+            .float()
+            .unsqueeze(0)
+        )
+        x_ice_delta = x_ice_t0 - x_ice_t_minus_1
+
+        x_static = (
+            torch.from_numpy(self.shipping_routes_mask.values[h: h + H, w: w + W])
+            .float()
+            .unsqueeze(0)
+        )
+        da_water_temp = self.get_water_temp_for_day(day_t0)
+        if da_water_temp is not None:
+            patch_data = da_water_temp.squeeze().values[h: h + H, w: w + W]
+            water_temp_values = np.where(patch_data > 0, patch_data, 0.0)
+            # Normalize Water Temp: Divide by 30.0 (Max observed ~28.8)
+            water_temp_norm = water_temp_values / 30.0
+            x_water_temp = (
+                torch.from_numpy(np.nan_to_num(water_temp_norm)).float().unsqueeze(0)
+            )
+        else:
             x_water_temp = torch.zeros((1, H, W), dtype=torch.float32)
 
-        #gebco_patch = self.gebco_data.values[h:h+H, w:w+W]
-        gebco_patch = self.gebco_data.values[0, h:h+H, w:w+W]
-        x_gebco_tensor = torch.from_numpy(gebco_patch).float().unsqueeze(0) # [1, H, W]
+        weather_da = self.hrrr_data.sel(
+            time=str(day_t_minus_1), method="nearest", tolerance=pd.Timedelta(hours=12)
+        )
+        weather_patch = weather_da.isel(y=slice(h, h + H), x=slice(w, w + W))
+        weather_patch_normalized = np.empty((len(HRRR_VARS), H, W), dtype=np.float32)
+        for i, var_name in enumerate(HRRR_VARS):
+            stats = self.weather_stats[var_name]
+            weather_patch_normalized[i, :, :] = (
+                weather_patch[var_name].values - stats["mean"]
+            ) / (stats["std"] + 1e-6)
+        x_weather_tensor = torch.from_numpy(
+            np.nan_to_num(weather_patch_normalized)
+        ).float()
 
-        # --- 1e. Build Weather (T-1) ---
-        
-        # Get data from the pre-loaded cache instead of S3
+        # --- CFDD Channel ---
+        # Load CFDD for the target day (T0)
         try:
-            weather_da = self.hrrr_data_cache[str(day_t_minus_1)]
-        except KeyError:
-            # Fallback for Windows + num_workers > 0, where memory isn't shared
-            # This is slower but will still work.
-            # print(f"!!! WARNING: Worker cache empty. Loading HRRR for {day_t_minus_1} dynamically.")
-            weather_da = data_loaders.load_hrrr_data_for_day(day_t_minus_1)
-
-        if weather_da is None:
-            print(f"!!! WARNING: Missing weather data for {day_t_minus_1}, using zeros.")
-            weather_patch_normalized = np.zeros((N_WEATHER_CHANNELS, H, W), dtype=np.float32)
-        else:
-            #print(f"weather_da shape: {weather_da.sizes}") # DEBUG
-            weather_patch_xr = weather_da.isel(y=slice(h, h+H), x=slice(w, w+W))
-            weather_patch = weather_patch_xr[HRRR_VARS].to_array().values # Shape [4, H, W]
+            cfdd_da = self.cfdd_data.sel(time=str(day_t0), method="nearest", tolerance=pd.Timedelta(hours=12))
+            cfdd_patch = cfdd_da.squeeze().values[h: h + H, w: w + W]
             
-            weather_patch_normalized = np.empty_like(weather_patch, dtype=np.float32)
-            for i, var_name in enumerate(HRRR_VARS):
-                stats = self.weather_stats[var_name]
-                mean = stats['mean']
-                std = stats['std']
-                var_patch_data = weather_patch[i, :, :].astype(np.float32)
-                if std > 1e-6:
-                    weather_patch_normalized[i, :, :] = (var_patch_data - mean) / std
-                else:
-                    weather_patch_normalized[i, :, :] = var_patch_data - mean
-            weather_patch_normalized = np.nan_to_num(
-                weather_patch_normalized, nan=0.0, posinf=0.0, neginf=0.0
+            # Normalize CFDD: Scale by a physical maximum (e.g., 3000 degree-days)
+            # This preserves the positive, cumulative nature of the variable.
+            # Z-score was causing negative values for early winter (0 CFDD), which ReLU suppressed.
+            MAX_CFDD = 3000.0
+            cfdd_patch_norm = cfdd_patch / MAX_CFDD
+            
+            x_cfdd = torch.from_numpy(np.nan_to_num(cfdd_patch_norm)).float().unsqueeze(0)
+        except (KeyError, AttributeError, ValueError):
+            x_cfdd = torch.zeros((1, H, W), dtype=torch.float32)
+
+        # --- GEBCO Normalization ---
+        # GEBCO is elevation (meters). Water is negative.
+        # We want depth as positive feature 0-1.
+        # Max depth ~335m. Let's divide by 400.0.
+        gebco_patch = self.gebco_data.values[0, h: h + H, w: w + W]
+        # Invert sign for water (make depth positive), clamp land to 0
+        depth_patch = np.where(gebco_patch < 0, -gebco_patch, 0.0)
+        depth_norm = depth_patch / 400.0
+        x_gebco = (
+            torch.from_numpy(depth_norm).float().unsqueeze(0)
+        )
+        
+        # --- Floe Size & Edge Mask (New Channels) ---
+        if "floe_size" in ds_t0:
+            x_floe = torch.from_numpy(ds_t0["floe_size"].values[h: h + H, w: w + W]).float().unsqueeze(0)
+        else:
+            x_floe = torch.zeros((1, H, W), dtype=torch.float32)
+            
+        if "edge_mask" in ds_t0:
+            x_edge = torch.from_numpy(ds_t0["edge_mask"].values[h: h + H, w: w + W]).float().unsqueeze(0)
+        else:
+            x_edge = torch.zeros((1, H, W), dtype=torch.float32)
+
+        x = torch.cat(
+            [x_ice_t0, x_ice_delta, x_weather_tensor, x_water_temp, x_static, x_gebco, x_cfdd, x_floe, x_edge],
+            dim=0,
+        )
+
+        # --- 2. Build Target Tensors ---
+        y_conc, y_thick = [], []
+        for i in range(1, N_TIMESTEPS + 1):
+            ds_t_plus_i = self.get_ice_data_for_day(day_t0 + datetime.timedelta(days=i))
+            y_conc.append(
+                torch.from_numpy(
+                    ds_t_plus_i["ice_concentration"].values[h: h + H, w: w + W]
+                ).float()
             )
+            y_thick.append(
+                torch.from_numpy(
+                    ds_t_plus_i["ice_thickness"].values[h: h + H, w: w + W]
+                ).float()
+            )
+        
+        y = torch.stack(y_conc, dim=0)
+        y_thickness = torch.stack(y_thick, dim=0)
 
-        x_weather_tensor = torch.from_numpy(weather_patch_normalized).float() # [4, H, W]
+        if config.DEBUG_MODE and idx == 0:
+            config.DEBUG_DIR.mkdir(exist_ok=True)
+            fig, axes = plt.subplots(4, 4, figsize=(20, 20))
+            for i in range(x.shape[0]):
+                ax = axes[i // 4, i % 4]
+                ax.imshow(x[i].numpy())
+                ax.set_title(f"Input Channel {i}")
+            for i in range(y.shape[0]):
+                ax = axes[(i + x.shape[0]) // 4, (i + x.shape[0]) % 4]
+                ax.imshow(y[i].numpy())
+                ax.set_title(f"Target Conc T+{i+1}")
+            for i in range(y_thickness.shape[0]):
+                ax = axes[(i + x.shape[0] + y.shape[0]) // 4, (i + x.shape[0] + y.shape[0]) % 4]
+                ax.imshow(y_thickness[i].numpy())
+                ax.set_title(f"Target Thick T+{i+1}")
 
-        # --- 1f. Concatenate all inputs ---
-        
-        # Convert any NaNs from GLSEA, GEBCO, or NIC data to 0.0
-        # before concatenating. This is critical for model stability.
-        x_ice_t0 = torch.nan_to_num(x_ice_t0, nan=0.0)
-        x_ice_delta = torch.nan_to_num(x_ice_delta, nan=0.0)
-        # x_weather_tensor is already clean (we used np.nan_to_num)
-        x_water_temp = torch.nan_to_num(x_water_temp, nan=0.0)
-        # x_static_tensor is clean (uint8)
-        x_gebco_tensor = torch.nan_to_num(x_gebco_tensor, nan=0.0)
+            plt.savefig(config.DEBUG_DIR / "dataset_sample.png")
+            plt.close()
 
-        x = torch.cat([
-            x_ice_t0,          # [1, H, W]
-            x_ice_delta,       # [1, H, W]
-            x_weather_tensor,  # [4, H, W]
-            x_water_temp,      # [1, H, W]
-            # x_glsea_ice_conc,  # [1, H, W]
-            x_static_tensor,   # [1, H, W] (shipping routes)
-            x_gebco_tensor     # [1, H, W] (GEBCO bathymetry)
-        ], dim=0)               # Total Shape: [9, H, W]
+        # Calculate categorical thickness targets
+        # y_thickness is (T, H, W). We need (T, H, W) integers.
+        # We can use apply_along_axis or just a loop since it's a small patch.
+        # Vectorized approach is better.
+        # But get_thickness_class is scalar.
+        # Let's use np.vectorize or just simple thresholding here for speed.
+        y_thick_np = y_thickness.numpy()
+        y_thick_class_np = np.zeros_like(y_thick_np, dtype=np.int64)
         
-        # --- 2. Build Target Tensor (y) ---
-        day_t1 = day_t0 + datetime.timedelta(days=1)
-        day_t2 = day_t0 + datetime.timedelta(days=2)
-        day_t3 = day_t0 + datetime.timedelta(days=3)
+        # 0: Water (<=0.001)
+        # 1: New Ice (<0.10)
+        # 2: Young Ice (<0.30)
+        # 3: First Year Thin (<0.70)
+        # 4: First Year Medium (<1.20)
+        # 5: First Year Thick (>=1.20)
         
-        y1 = self.build_output_tensor(day_t1, h, w) # [H, W]
-        y2 = self.build_output_tensor(day_t2, h, w) # [H, W]
-        y3 = self.build_output_tensor(day_t3, h, w) # [H, W]
+        y_thick_class_np[(y_thick_np > 0.001) & (y_thick_np < 0.10)] = 1
+        y_thick_class_np[(y_thick_np >= 0.10) & (y_thick_np < 0.30)] = 2
+        y_thick_class_np[(y_thick_np >= 0.30) & (y_thick_np < 0.70)] = 3
+        y_thick_class_np[(y_thick_np >= 0.70) & (y_thick_np < 1.20)] = 4
+        y_thick_class_np[y_thick_np >= 1.20] = 5
         
-        y = torch.stack([y1, y2, y3], dim=0) # Shape [3, H, W]
-        
-        # --- 3. Build Land Mask ---
-        land_mask_patch = self.land_mask.values[h:h+H, w:w+W]
-        land_mask_tensor = torch.from_numpy(land_mask_patch).float() # [H, W]
-
-        # This matches the logic needed for the loss function
-        shipping_mask_tensor = x_static_tensor.squeeze(0)
+        y_thickness_class = torch.from_numpy(y_thick_class_np).long()
 
         return {
-            'x': x,
-            'y': y,
-            'land_mask': land_mask_tensor,
-            'shipping_mask': shipping_mask_tensor,
-            'date': str(day_t0)
+            "x": x,
+            "y": y,
+            "y_thickness": y_thickness,
+            "y_thickness_class": y_thickness_class,
+            "land_mask": torch.from_numpy(
+                self.land_mask.values[h: h + H, w: w + W]
+            ).float(),
+            "shipping_mask": x_static.squeeze(0),
+            "edge_mask": x_edge.squeeze(0),
+            "date": str(day_t0),
         }
 
-# --- Main test block (for debugging) ---
-if __name__ == "__main__":
-    print("--- Running dataset.py in debug mode ---")
-    train_dataset = GreatLakesDataset(is_train=True)
-    weather_stats = train_dataset.weather_stats
-    print("\n--- Loading Validation Data (with stats) ---")
-    val_dataset = GreatLakesDataset(is_train=False, weather_stats=weather_stats)
-    
-    print(f"\nTotal training samples: {len(train_dataset)}")
-    
-    if len(train_dataset) > 0:
-        train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
-        print("\n--- Testing Training DataLoader (first 3 batches) ---")
-        
-        for i, batch in enumerate(train_loader):
-            if i >= 3:
-                break
-            print(f"\n--- Batch {i+1} ---")
-            print(f"  Date: {batch['date'][0]} (and {len(batch['date'])-1} others)")
-            print(f"  X shape: {batch['x'].shape}")
-            print(f"  Y shape: {batch['y'].shape}")
-            print(f"  Mask shape: {batch['land_mask'].shape}")
-            
-            # --- Quick Stats Check ---
-            print(f"  X Min: {batch['x'].min():.2f}, Max: {batch['x'].max():.2f}, Mean: {batch['x'].mean():.2f}")
-            print(f"  Y Min: {batch['y'].min():.2f}, Max: {batch['y'].max():.2f}, Mean: {batch['y'].mean():.2f}")
-            print(f"  Y NaNs: {torch.isnan(batch['y']).sum()}")
-            print(f"  X NaNs: {torch.isnan(batch['x']).sum()}")
 
-    print("\n--- dataset.py debug run complete ---")
+import re
+
+class ConfigurableFastTensorDataset(Dataset):
+    """
+    A flexible dataset for loading pre-processed .pt files. It can either
+    pre-load the entire dataset into RAM for speed or lazy-load from disk
+    to conserve RAM.
+    """
+    def __init__(
+        self,
+        is_train: bool = True,
+        val_start_date: datetime.date = None,
+        shipping_routes_only: bool = False,
+        pre_load: bool = False,
+        min_ice_threshold: float = 0.0,
+        min_thickness_threshold: float = 0.0,
+        stratify_mode: bool = False,
+        stratify_ratio: float = 0.5, # Target ratio of "thick" samples (0.0 to 1.0)
+        stratify_threshold: float = 0.3, # Threshold to define "thick" ice
+    ):
+        if config.DEBUG_MODE:
+            logging.debug(f"Initializing ConfigurableFastTensorDataset with is_train={is_train}, val_start_date={val_start_date}, shipping_routes_only={shipping_routes_only}, pre_load={pre_load}, min_ice={min_ice_threshold}, min_thick={min_thickness_threshold}, stratify={stratify_mode}")
+        self.data_dir = config.DATA_ROOT / "processed_tensors"
+        self.pre_load = pre_load
+        self.is_train = is_train
+
+        all_files = sorted(list(self.data_dir.glob("batch_*.pt")))
+        if not all_files:
+            raise FileNotFoundError(f"No pre-processed tensor files found in {self.data_dir}.")
+
+        # 1. Split files into train/val sets
+        if val_start_date:
+            train_files, val_files = [], []
+            date_pattern = re.compile(r"(\d{4}-\d{2}-\d{2})")
+            for f in tqdm(all_files, desc="Splitting files by date"):
+                match = date_pattern.search(f.name)
+                if not match:
+                    continue
+                file_date = datetime.datetime.strptime(match.group(1), "%Y-%m-%d").date()
+                if file_date < val_start_date:
+                    train_files.append(f)
+                else:
+                    val_files.append(f)
+            self.files = train_files if self.is_train else val_files
+        else:
+            num_val_batches = 2
+            self.files = all_files[:-num_val_batches] if self.is_train else all_files[-num_val_batches:]
+
+        # 2. Load data based on the pre_load flag
+        self.samples = []
+        self.index = []
+        
+        total_samples_scanned = 0
+        
+        # Temporary storage for stratification
+        thick_candidates = [] # Stores (sample) or (file_idx, sample_idx)
+        thin_candidates = []
+        
+        logging.info(f"Scanning files (Stratify={stratify_mode})...")
+        
+        for file_idx, f_path in enumerate(tqdm(self.files, desc="Scanning files")):
+            samples_in_file = torch.load(f_path, weights_only=False)
+            for sample_idx, sample in enumerate(samples_in_file):
+                total_samples_scanned += 1
+                
+                # --- Base Filtering ---
+                # Filter: Shipping Routes
+                if shipping_routes_only and not torch.any(sample["shipping_mask"] > 0):
+                    continue
+                # Filter: Min Ice Threshold (Always apply this to ignore water)
+                if min_ice_threshold > 0 and sample["y"].max() < min_ice_threshold:
+                    continue
+                
+                # --- Stratification or Thresholding ---
+                max_thick = sample.get("y_thickness", torch.zeros_like(sample["y"])).max()
+                
+                if stratify_mode:
+                    item_to_store = sample if self.pre_load else (file_idx, sample_idx)
+                    if max_thick >= stratify_threshold:
+                        thick_candidates.append(item_to_store)
+                    else:
+                        thin_candidates.append(item_to_store)
+                else:
+                    # Standard Thresholding
+                    if min_thickness_threshold > 0 and max_thick < min_thickness_threshold:
+                        continue
+                        
+                    if self.pre_load:
+                        self.samples.append(sample)
+                    else:
+                        self.index.append((file_idx, sample_idx))
+
+        # 3. Apply Stratification Logic
+        if stratify_mode:
+            num_thick = len(thick_candidates)
+            num_thin = len(thin_candidates)
+            logging.info(f"Stratification Candidates: {num_thick} Thick (>{stratify_threshold}m), {num_thin} Thin")
+            
+            if num_thick == 0:
+                logging.warning("No thick samples found! Falling back to all thin samples.")
+                final_items = thin_candidates
+            elif num_thin == 0:
+                logging.warning("No thin samples found! Using only thick samples.")
+                final_items = thick_candidates
+            else:
+                # Calculate how many thin samples to keep to match the ratio
+                # target_thick_ratio = num_thick / (num_thick + num_thin_to_keep)
+                # num_thin_to_keep = num_thick * (1 - ratio) / ratio
+                
+                if stratify_ratio >= 1.0:
+                    num_thin_to_keep = 0
+                else:
+                    num_thin_to_keep = int(num_thick * (1.0 - stratify_ratio) / stratify_ratio)
+                
+                # Clamp to available thin samples
+                num_thin_to_keep = min(num_thin_to_keep, num_thin)
+                
+                # Randomly select thin samples
+                import random
+                random.shuffle(thin_candidates)
+                selected_thin = thin_candidates[:num_thin_to_keep]
+                
+                final_items = thick_candidates + selected_thin
+                random.shuffle(final_items)
+                
+                logging.info(f"Stratified Selection: Kept {len(thick_candidates)} Thick + {len(selected_thin)} Thin = {len(final_items)} Total. (Target Ratio: {stratify_ratio})")
+
+            if self.pre_load:
+                self.samples = final_items
+            else:
+                self.index = final_items
+        else:
+            logging.info(f"Dataset (Train={self.is_train}, Pre-load={self.pre_load}): {len(self.samples) if self.pre_load else len(self.index)} samples kept out of {total_samples_scanned} scanned.")
+
+        num_samples = len(self.samples) if self.pre_load else len(self.index)
+        if num_samples == 0:
+            logging.warning("No samples found for this dataset configuration.")
+
+    @lru_cache(maxsize=1)
+    def _load_file(self, file_idx: int):
+        return torch.load(self.files[file_idx], weights_only=False)
+
+    def __len__(self):
+        return len(self.samples) if self.pre_load else len(self.index)
+
+    def __getitem__(self, idx):
+        # DEBUG: Trace getitem
+        # if idx % 100 == 0:
+        #     print(f"Loading sample {idx}")
+            
+        if self.pre_load:
+            sample = self.samples[idx]
+        else:
+            file_idx, sample_idx_in_file = self.index[idx]
+            samples_in_file = self._load_file(file_idx)
+            sample = samples_in_file[sample_idx_in_file]
+
+
+            
+        return sample
+
+
+class FileAwareSampler(Sampler):
+    """
+    A PyTorch Sampler that shuffles data by first shuffling files (batches)
+    and then shuffling samples within each file.
+    """
+    def __init__(self, dataset: 'ConfigurableFastTensorDataset'):
+        """
+        Args:
+            dataset (Dataset): The dataset to sample from. Must have an `index`
+                               attribute as described above.
+        """
+        super().__init__(dataset)
+        if dataset.pre_load:
+            raise ValueError("FileAwareSampler is not needed when pre_load is True.")
+
+        self.dataset = dataset
+        self.indices_by_file = defaultdict(list)
+        for i, (file_idx, _) in enumerate(self.dataset.index):
+            self.indices_by_file[file_idx].append(i)
+
+        self.num_samples = len(self.dataset.index)
+        if config.DEBUG_MODE:
+            logging.debug(f"FileAwareSampler indexed {len(self.indices_by_file)} files and {self.num_samples} total samples.")
+
+    def __iter__(self):
+        # Get a list of file indices and shuffle them
+        file_indices = list(self.indices_by_file.keys())
+        np.random.shuffle(file_indices)
+
+        # Iterate through shuffled files and then shuffled samples within each file
+        for file_idx in file_indices:
+            sample_indices_for_file = self.indices_by_file[file_idx]
+            np.random.shuffle(sample_indices_for_file)
+            for sample_idx in sample_indices_for_file:
+                yield sample_idx
+
+    def __len__(self):
+        return self.num_samples

@@ -1,21 +1,62 @@
 import os
 from pathlib import Path
 import datetime
+from typing import Dict, Any
 
 # --- Project Root ---
 PROJECT_ROOT = Path(os.path.dirname(os.path.abspath(__file__)))
 DATA_ROOT = PROJECT_ROOT / "datasets"
 
+import logging
+
+DEBUG_MODE = True
+PRINT_RAM_USAGE = False
+DEBUG_DIR = PROJECT_ROOT / "debug"
+DEBUG_VIZ_DIR = DEBUG_DIR / "viz"
+
+
+def setup_logging(script_name: str):
+    """
+    Configures logging to write to a file in the debug directory.
+    """
+    DEBUG_DIR.mkdir(exist_ok=True)
+    log_file = DEBUG_DIR / f"{script_name}.log"
+    
+    # Reset existing handlers to avoid duplicate logs
+    root = logging.getLogger()
+    if root.handlers:
+        for handler in root.handlers:
+            root.removeHandler(handler)
+            
+    level = logging.DEBUG if DEBUG_MODE else logging.INFO
+    
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, mode='w'), # Overwrite log on new run
+        ]
+    )
+    
+    # Add a console handler for Warnings and Errors only, to keep console clean
+    console = logging.StreamHandler()
+    console.setLevel(logging.WARNING)
+    formatter = logging.Formatter("%(levelname)s: %(message)s")
+    console.setFormatter(formatter)
+    logging.getLogger('').addHandler(console)
+    
+    logging.info(f"Logging setup for {script_name}. Writing to {log_file}")
+
 START_DATE = datetime.date(2018, 12, 1)
-END_DATE = datetime.date(2019, 3, 1)
+END_DATE = datetime.date(2019, 5, 1)
 
 # This maps our standard names to the *full Zarr paths*
 # within the 2018-2019 files.
 HRRR_VAR_MAP = {
-    'air_temp_2m':    '2m_above_ground/TMP',
-    'u_wind_10m':     '10m_above_ground/UGRD',
-    'v_wind_10m':     '10m_above_ground/VGRD',
-    'precip_surface': 'surface/PRATE',
+    "air_temp_2m": "2m_above_ground/TMP",
+    "u_wind_10m": "10m_above_ground/UGRD",
+    "v_wind_10m": "10m_above_ground/VGRD",
+    "precip_surface": "surface/PRATE",
 }
 # This list (e.g., ['air_temp_2m', ...]) is used by the rest of the scripts
 HRRR_VARS = list(HRRR_VAR_MAP.keys())
@@ -23,37 +64,47 @@ HRRR_VARS = list(HRRR_VAR_MAP.keys())
 TRAIN_NIC_SHP_DIR = DATA_ROOT / "Ice Data" / "nic_shapefiles_unzipped"
 # Zarr URL for HRRR data
 # This is the root bucket, as shown in the guide
-TRAIN_HRRR_ZARR_ROOT = 's3://hrrrzarr' 
+TRAIN_HRRR_ZARR_ROOT = "s3://hrrrzarr"
+HRRR_CACHE_DIR = DATA_ROOT / "HRRR_data_cache"
 # This is the grid file, from "Option 2" of the guide
 
 # Path to the unzipped shipping routes shapefile
 SHIPPING_ROUTES_SHP = DATA_ROOT / "Shipping_Routes" / "shippinglanes.shp"
 # Land mask file
-TRAIN_ICE_ASC_DIR = DATA_ROOT / "Ice Data" / "ice asc" # Used for land mask
-LAND_MASK_FILE = TRAIN_ICE_ASC_DIR / "g20190111.ct" # Or any single file for the grid
+TRAIN_ICE_ASC_DIR = DATA_ROOT / "Ice Data" / "ice asc"  # Used for land mask
+LAND_MASK_FILE = TRAIN_ICE_ASC_DIR / "g20190111.ct"  # Or any single file for the grid
 TRAIN_NIC_CACHE_FILE = DATA_ROOT / "Ice Data" / "nic_ice_data_cache.nc"
 
 TRAIN_GLSEA_ICE_NC_FILES = [
-    DATA_ROOT / "Water Surface Temperature Data" / "GLSEA_ICE" / "2018_glsea_ice.nc",
-    DATA_ROOT / "Water Surface Temperature Data" / "GLSEA_ICE" / "2019_glsea_ice.nc",
+    DATA_ROOT / "Water_Surface_Temperature_Data" / "GLSEA_ICE" / "2018_glsea_ice.nc",
+    DATA_ROOT / "Water_Surface_Temperature_Data" / "GLSEA_ICE" / "2019_glsea_ice.nc",
 ]
-TRAIN_GLSEA_ICE_CACHE_FILE = DATA_ROOT / "Water Surface Temperature Data" / "glsea_ice_data_cache.nc"
-GEBCO_FILE = DATA_ROOT / "Water Surface Temperature Data" / "gebco_great_lakes.tif"
+TRAIN_GLSEA_ICE_CACHE_FILE = DATA_ROOT / "GLSEA_Ice" / "glsea_ice_master_cache.nc"
+GEBCO_FILE = DATA_ROOT / "Bathymetry" / "gebco_reprojected.tif"
+
+# --- Model Parameters ---
+# 3 HRRR temps + 1 Land Mask + 1 Shipping Mask + 1 CFDD = 6 channels
+N_INPUT_CHANNELS = 6
 
 # --- Master Grid Definition (from training data) ---
-ORIGINAL_GLSEA_FILE = DATA_ROOT / "Water Surface Temperature Data" / "netcdf" / "glsea_20190111-20190131.nc"
+ORIGINAL_GLSEA_FILE = (
+    DATA_ROOT
+    / "Water_Surface_Temperature_Data"
+    / "netcdf"
+    / "glsea_20190111-20190131.nc"
+)
 MASTER_GRID_TEMPLATE_FILE = ORIGINAL_GLSEA_FILE
 MASTER_GRID_CRS = "EPSG:4326"  # Our target grid (standard Lat/Lon)
-ICE_ASC_NATIVE_CRS = "EPSG:3175" # NAD83 / Great Lakes Albers (projected, in meters)
+ICE_ASC_NATIVE_CRS = "EPSG:3175"  # NAD83 / Great Lakes Albers (projected, in meters)
 GLSEA_VARIABLE_NAME = "temp"
 
 # --- Training Constants ---
 ICE_ASC_HEADER_LINES = 7
 ICE_ASC_NODATA_VAL = -1
 
-TEST_DATA_DIR = DATA_ROOT / "Test Data"
-TEST_IC_DIR = TEST_DATA_DIR / "Ice & Water Surface Temperature Initial Conditions"
-TEST_WEATHER_DIR = TEST_DATA_DIR / "Weather Data"
+TEST_DATA_DIR = DATA_ROOT / "Test_Data"
+TEST_IC_DIR = TEST_DATA_DIR / "Ice_and_Water_Surface_Temperature_Initial_Conditions"
+TEST_WEATHER_DIR = TEST_DATA_DIR / "WeatherData"
 
 TEST_ICE_NC = TEST_IC_DIR / "ice_test_initial_condition.nc"
 TEST_GLSEA_NC = TEST_IC_DIR / "glsea_ice_test_initial_condition.nc"
@@ -65,3 +116,44 @@ MODEL_PATH = PROJECT_ROOT / "checkpoints" / "best_model.pth"
 OUTPUT_DIR = PROJECT_ROOT / "forecasts"
 FORECAST_FILE = OUTPUT_DIR / "submission_forecast_T0_to_T3.nc"
 OUTPUT_IMAGE = OUTPUT_DIR / "submission_visualization.png"
+
+# --- Processed NIC Data ---
+# Directory for gridded NetCDF files created from NIC shapefiles
+NIC_PROCESSED_DIR = DATA_ROOT / "NIC_Processed"
+
+# --- Local Data Files ---
+TRAIN_HRRR_NC_FILE = DATA_ROOT / "WeatherData" / "hrrr_train_period.nc"
+TRAIN_CFDD_NC_FILE = DATA_ROOT / "cfdd_train.nc"
+
+
+def get_default_config() -> Dict[str, Any]:
+    """
+    Returns the default configuration dictionary for a single training run.
+    This is the baseline configuration.
+    """
+    return {
+        # --- Run Identifier ---
+        "run_id": "Final_Polish_Categorical",
+        # --- Training Hyperparameters ---
+        "batch_size": 16,
+        "num_epochs": 30, # Long run
+        "learning_rate": 1e-4,
+        "optimizer": "AdamW",
+        "weight_decay": 1e-5,
+        "scheduler_patience": 5,
+        # --- Model Architecture ---
+        "unet_depth": 3,
+        "n_filters": 64,
+        "dropout_rate": 0.3,
+        "use_attention": True,
+        "use_physics_gate": True,
+        "num_classes": 6, # Categorical Thickness
+        # --- Loss Function ---
+        "thickness_loss_weight": 5.0,
+        "physics_loss_weight": 0.1,
+        "max_ice_growth_per_day": 0.3,
+        "loss_type_conc": "mse",
+        "thickness_loss_ice_weight": False,
+        # --- Evaluation ---
+        "eval_patch_dir": None,
+    }
